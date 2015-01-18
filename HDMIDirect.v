@@ -26,6 +26,18 @@ reg [10:0] videoaddress;
 reg [10:0] videoaddressout;
 reg [16:0] videobusout;
 reg frame;
+reg tercData;
+reg [3:0] dataChannel0;
+reg [3:0] dataChannel1;
+reg [3:0] dataChannel2;
+reg [3:0] preamble;
+reg dataGuardBand;
+reg videoGuardBand;
+reg [23:0] packetHeader;
+reg [7:0]  bchHdr;
+reg [55:0] subpacket [3:0];
+reg [7:0]  bchCode [3:0];
+reg [4:0]  dataOffset;
 
 initial
 begin
@@ -38,6 +50,24 @@ begin
  videoaddressout=0;
  videoaddressout=0;
  frame=0;
+ tercData=0;
+ dataChannel0=0;
+ dataChannel1=0;
+ dataChannel2=0;
+ preamble=0;
+ dataGuardBand=0;
+ videoGuardBand=0;
+ packetHeader=0;
+ bchHdr=0;
+ subpacket[0]=0;
+ subpacket[1]=0;
+ subpacket[2]=0;
+ subpacket[3]=0;
+ bchCode[0]=0;
+ bchCode[1]=0;
+ bchCode[2]=0;
+ bchCode[3]=0;
+ dataOffset=0;
 end
 
 `define DISPLAY_WIDTH 640 //720 //640
@@ -64,6 +94,130 @@ always @(posedge pixclk) DrawArea <= (CounterX<`DISPLAY_WIDTH) && (CounterY<`DIS
 
 always @(posedge pixclk) hSync <= (CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC));
 always @(posedge pixclk) vSync <= (CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH)) && (CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC));
+
+`define DATA_START		`DISPLAY_WIDTH+`H_FRONT_PORCH+4;
+`define DATA_PREAMBLE	8
+`define DATA_GUARDBAND	2
+`define DATA_SIZE		32
+`define CTL_GAP			4
+`define VIDEO_PREAMBLE	8
+`define VIDEO_GUARDBAND	2
+// Total time 60 pixels (want it to fit with hsync period) 
+
+function [7:0] ECCcode
+	input [7:0] code;
+	input bit;
+	input mask;
+	begin
+		ECCcode = (code<<1) ^ (((code[7]^bit) && mask)?(1+(1<<6)+(1<<7)):0);
+	end
+endfunction
+
+function ECC;
+	inout [7:0] code;
+	input bit;
+	input mask;
+	begin
+		ECC = mask?bit:code[7];
+		code <= ECCcode(code, bit, mask);
+	end
+endfunction
+
+function ECC2a;
+	input [7:0] code;
+	input bita;
+	input bitb;
+	input mask;
+	begin
+		ECC2a = mask?bita:code[7];
+	end
+endfunction
+
+function ECC2b;
+	inout [7:0] code;
+	input bita;
+	input bitb;
+	input mask;
+	begin
+		ECC2b = mask?bitb:ECCcode(code, bita, mask)[7];
+		code <= ECCcode(ECCcode(code, bita, mask), bitb, mask);
+	end
+endfunction
+
+always @(posedge pixclk)
+begin
+	if (CounterX>=('DISPLAY_WIDTH+'DATA_START)
+	begin
+		if (CounterX<(`DATA_START+`DATA_PREAMBLE)
+		begin
+			preamble<='b1010;
+		end
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND)
+		begin
+			tercData<=1;
+			dataGuardBand<=1;
+			dataChannel0<={1, 1, vSync, hSync};
+			preamble<=0;
+			packetHeader<=0;	// null packet
+			subpacket[0]<=0;
+			subpacket[1]<=0;
+			subpacket[2]<=0;
+			subpacket[3]<=0;
+			bchHdr<=0;
+			bchCode[0]<=0;
+			bchCode[1]<=0;
+			bchCode[2]<=0;
+			bchCode[3]<=0;
+			dataOffset<=0;
+		end
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE)
+		begin
+			dataGuardBand<=0;
+			dataChannel0<={dataOffset?1:0, ECC(bchHdr, packetHeader[0], dataOffset<24), vSync, hSync};
+			dataChannel1<={
+				ECC2a(bchCode[3], subpacket[3][0], subpacket[3][1], dataOffset<28),
+				ECC2a(bchCode[2], subpacket[2][0], subpacket[2][1], dataOffset<28),
+				ECC2a(bchCode[1], subpacket[1][0], subpacket[1][1], dataOffset<28),
+				ECC2a(bchCode[0], subpacket[0][0], subpacket[0][1], dataOffset<28)
+				};
+			dataChannel2<={
+				ECC2b(bchCode[3], subpacket[3][0], subpacket[3][1], dataOffset<28),
+				ECC2b(bchCode[2], subpacket[2][0], subpacket[2][1], dataOffset<28),
+				ECC2b(bchCode[1], subpacket[1][0], subpacket[1][1], dataOffset<28),
+				ECC2b(bchCode[0], subpacket[0][0], subpacket[0][1], dataOffset<28)
+				};
+			packetHeader<=packetHeader[23:1];
+			subpacket[0]<=subpacket[0][55:2];
+			subpacket[1]<=subpacket[1][55:2];
+			subpacket[2]<=subpacket[2][55:2];
+			subpacket[3]<=subpacket[3][55:2];
+			dataOffset<=dataOffset+1;
+		end
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND)
+		begin
+			dataGuardBand<=1;
+		end
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND+`CTL_GAP)
+		begin
+			tercData<=0;
+			dataGuardBand<=0;
+		end
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND+`CTL_GAP+`VIDEO_PREAMBLE)
+		begin
+			preamble<='b1000;
+		end
+		else
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND+`CTL_GAP+`VIDEO_PREAMBLE+`VIDEO_GUARDBAND)
+		begin
+			preamble<=0;
+			videoGuardBand<=1;
+		end
+		else
+		begin
+			videoGuardBand<=0;
+		end
+	end
+end
 
 ////////////////
 //wire [7:0] W = {8{CounterX[7:0]==CounterY[7:0]}};
@@ -118,9 +272,18 @@ end
 
 ////////////////////////////////////////////////////////////////////////
 wire [9:0] TMDS_red, TMDS_green, TMDS_blue;
-TMDS_encoder encode_R(.clk(pixclk), .VD(red  ), .CD(2'b00)        , .VDE(DrawArea), .TMDS(TMDS_red));
-TMDS_encoder encode_G(.clk(pixclk), .VD(green), .CD(2'b00)        , .VDE(DrawArea), .TMDS(TMDS_green));
+TMDS_encoder encode_R(.clk(pixclk), .VD(red  ), .CD(preamble[1:0]), .VDE(DrawArea), .TMDS(TMDS_red));
+TMDS_encoder encode_G(.clk(pixclk), .VD(green), .CD(preamble[3:2]), .VDE(DrawArea), .TMDS(TMDS_green));
 TMDS_encoder encode_B(.clk(pixclk), .VD(blue ), .CD({vSync,hSync}), .VDE(DrawArea), .TMDS(TMDS_blue));
+
+wire [9:0] TERC4_red, TERC4_green, TERC4_blue;
+TERC4_encoder encode_R4(.clk(pixclk), .data(dataChannel2), .TERC4(TERC4_red));
+TERC4_encoder encode_G4(.clk(pixclk), .data(dataChannel1), .TERC4(TERC4_green));
+TERC4_encoder encode_B4(.clk(pixclk), .data(dataChannel0), .TERC4(TERC4_blue));
+
+wire redSource = videoGuardBand ? : 10'b1011001100 : (dataGuardBand ? 10'b0100110011 : (tercData ? TERC4_red : TMDS_red));
+wire greenSource = (dataGuardBand || videoGuardBand) ? 10'b0100110011 : (tercData ? TERC4_green : TMDS_green);
+wire blueSource = videoGuardBand ? 10'b1011001100 : (tercData ? TERC4_blue : TMDS_blue);
 
 ////////////////////////////////////////////////////////////////////////
 reg [3:0] TMDS_mod10;  // modulus 10 counter
@@ -140,9 +303,9 @@ end
 
 always @(posedge clk_TMDS)
 begin
-	TMDS_shift_red   <= (TMDS_mod10==4'd0) ? TMDS_red   : TMDS_shift_red  [9:2];
-	TMDS_shift_green <= (TMDS_mod10==4'd0) ? TMDS_green : TMDS_shift_green[9:2];
-	TMDS_shift_blue  <= (TMDS_mod10==4'd0) ? TMDS_blue  : TMDS_shift_blue [9:2];	
+	TMDS_shift_red   <= (TMDS_mod10==4'd0) ? redSource   : TMDS_shift_red  [9:2];
+	TMDS_shift_green <= (TMDS_mod10==4'd0) ? greenSource : TMDS_shift_green[9:2];
+	TMDS_shift_blue  <= (TMDS_mod10==4'd0) ? blueSource  : TMDS_shift_blue [9:2];	
 	TMDS_mod10 <= (TMDS_mod10==4'd8) ? 4'd0 : TMDS_mod10+4'd2;
 end
 
@@ -188,5 +351,37 @@ always @(posedge clk) TMDS <= VDE ? TMDS_data : TMDS_code;
 always @(posedge clk) balance_acc <= VDE ? balance_acc_new : 4'h0;
 endmodule
 
+////////////////////////////////////////////////////////////////////////
+
+module TERC4_encoder(
+	input clk,
+	input [3:0] data,
+	output reg [9:0] TERC
+);
+
+always @(posedge clk)
+begin
+	case (data):
+		4'b0000: TERC <= 10'b1010011100;
+		4'b0001: TERC <= 10'b1001100011;
+		4'b0010: TERC <= 10'b1011100100;
+		4'b0011: TERC <= 10'b1011100010;
+		4'b0100: TERC <= 10'b0101110001;
+		4'b0101: TERC <= 10'b0100011110;
+		4'b0110: TERC <= 10'b0110001110;
+		4'b0111: TERC <= 10'b0100111100;
+		4'b1000: TERC <= 10'b1011001100;
+		4'b1001: TERC <= 10'b0100111001;
+		4'b1010: TERC <= 10'b0110011100;
+		4'b1011: TERC <= 10'b1011000110;
+		4'b1100: TERC <= 10'b1010001110;
+		4'b1101: TERC <= 10'b1001110001;
+		4'b1110: TERC <= 10'b0101100011;
+		4'b1111: TERC <= 10'b1011000011;
+	endcase
+end
+
+endmodule
 
 ////////////////////////////////////////////////////////////////////////
+
