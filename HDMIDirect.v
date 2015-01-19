@@ -38,6 +38,12 @@ reg [7:0]  bchHdr;
 reg [55:0] subpacket [3:0];
 reg [7:0]  bchCode [3:0];
 reg [4:0]  dataOffset;
+reg [191:0] channelStatus;
+reg [5:0] channelStatusIdx;
+reg tercDataDelayed;
+reg videoGuardBandDelayed;
+reg dataGuardBandDelayed;
+reg [24:0] samplesNeeded;
 
 initial
 begin
@@ -68,6 +74,12 @@ begin
  bchCode[2]=0;
  bchCode[3]=0;
  dataOffset=0;
+ channelStatus=0;
+ channelStatusIdx=0;
+ tercDataDelayed=0;
+ videoGuardBandDelayed=0;
+ dataGuardBandDelayed=0;
+ samplesNeeded=0;
 end
 
 `define DISPLAY_WIDTH 640 //720 //640
@@ -95,33 +107,40 @@ always @(posedge pixclk) DrawArea <= (CounterX<`DISPLAY_WIDTH) && (CounterY<`DIS
 always @(posedge pixclk) hSync <= (CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC));
 always @(posedge pixclk) vSync <= (CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH)) && (CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC));
 
-`define DATA_START		`DISPLAY_WIDTH+`H_FRONT_PORCH+4;
+`define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+8)
 `define DATA_PREAMBLE	8
 `define DATA_GUARDBAND	2
-`define DATA_SIZE		32
-`define CTL_GAP			4
+`define DATA_SIZE			32
 `define VIDEO_PREAMBLE	8
 `define VIDEO_GUARDBAND	2
-// Total time 60 pixels (want it to fit with hsync period) 
+`define CTL_END			(`FULL_WIDTH-`VIDEO_PREAMBLE-`VIDEO_GUARDBAND)
 
-function [7:0] ECCcode
+function [7:0] ECCcode;
 	input [7:0] code;
-	input bit;
+	input bita;
 	input mask;
 	begin
-		ECCcode = (code<<1) ^ (((code[7]^bit) && mask)?(1+(1<<6)+(1<<7)):0);
+		ECCcode = (code<<1) ^ (((code[7]^bita) && mask)?(1+(1<<6)+(1<<7)):0);
 	end
 endfunction
 
 function ECC;
-	inout [7:0] code;
-	input bit;
+	input [7:0] code;
+	input bita;
 	input mask;
 	begin
-		ECC = mask?bit:code[7];
-		code <= ECCcode(code, bit, mask);
+		ECC = mask?bita:code[7];
 	end
 endfunction
+
+task ECCu;
+	inout [7:0] code;
+	input bita;
+	input mask;
+	begin
+		code <= ECCcode(code, bita, mask);
+	end
+endtask
 
 function ECC2a;
 	input [7:0] code;
@@ -134,35 +153,86 @@ function ECC2a;
 endfunction
 
 function ECC2b;
+	input [7:0] code;
+	input bita;
+	input bitb;
+	input mask;
+	begin
+		ECC2b = mask?bitb:(code[6]^(((code[7]^bita) && mask)?1'b1:1'b0));
+	end
+endfunction
+
+task ECC2u;
 	inout [7:0] code;
 	input bita;
 	input bitb;
 	input mask;
 	begin
-		ECC2b = mask?bitb:ECCcode(code, bita, mask)[7];
 		code <= ECCcode(ECCcode(code, bita, mask), bitb, mask);
 	end
-endfunction
+endtask
 
 always @(posedge pixclk)
 begin
-	if (CounterX>=('DISPLAY_WIDTH+'DATA_START)
+	if (CounterY<136 && CounterX>=`DATA_START)
 	begin
-		if (CounterX<(`DATA_START+`DATA_PREAMBLE)
+		if (CounterX<(`DATA_START+`DATA_PREAMBLE))
 		begin
-			preamble<='b1010;
+			preamble<='b0101;
+			if (CounterX==`DATA_START) begin
+				if (CounterY==2) begin
+					if (channelStatusIdx==0) begin
+						channelStatus<=192'h00000000000000000000000000000000000000C203004004;
+					end
+					samplesNeeded<=samplesNeeded+1600;
+				end else begin
+					channelStatus[187:0]<=channelStatus[191:4];
+					channelStatus[191:188]<=channelStatus[3:0];
+					channelStatusIdx<=(channelStatusIdx<47)?channelStatusIdx+1:0;
+					if (samplesNeeded>=12)
+						samplesNeeded<=samplesNeeded-12;
+				end
+			end
 		end
-		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND)
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND))
 		begin
 			tercData<=1;
 			dataGuardBand<=1;
-			dataChannel0<={1, 1, vSync, hSync};
+			dataChannel0<={1'b1, 1'b1, vSync, hSync};
 			preamble<=0;
-			packetHeader<=0;	// null packet
-			subpacket[0]<=0;
-			subpacket[1]<=0;
-			subpacket[2]<=0;
-			subpacket[3]<=0;
+			if (CounterY==0) begin
+				packetHeader<=24'h0D0282;	// infoframe AVI packet
+				subpacket[0]<=56'h0000010008009c;
+				subpacket[1]<=56'h0501000005bf00;
+				subpacket[2]<=56'h00000000000000;
+				subpacket[3]<=56'h00000000000000;
+			end else if (CounterY==1) begin
+				packetHeader<=24'h0A0184;	// infoframe audio packet
+				subpacket[0]<=56'h00000000000170;
+				subpacket[1]<=56'h00000000000000;
+				subpacket[2]<=56'h00000000000000;
+				subpacket[3]<=56'h00000000000000;
+			end else if (CounterY==2) begin
+				packetHeader<=24'h000001;	// audio clock regeneration packet (N=0x1000 CTS=0x6270)
+				subpacket[0]<=56'h00100070620000;
+				subpacket[1]<=56'h00100070620000;
+				subpacket[2]<=56'h00100070620000;
+				subpacket[3]<=56'h00100070620000;
+			end else begin
+				if (samplesNeeded>=12) begin
+					packetHeader<=24'h000F02|(channelStatusIdx==0?24'h100000:24'h0);	// audio sample
+					subpacket[0]<=56'h99000000100100|(channelStatus[0]?56'h44000000000000:56'h0);
+					subpacket[1]<=56'h99000000110000|(channelStatus[1]?56'h44000000000000:56'h0);
+					subpacket[2]<=56'h99000000100100|(channelStatus[2]?56'h44000000000000:56'h0);
+					subpacket[3]<=56'h99000000010100|(channelStatus[3]?56'h44000000000000:56'h0);
+				end else begin
+					packetHeader<=0;
+					subpacket[0]<=0;
+					subpacket[1]<=0;
+					subpacket[2]<=0;
+					subpacket[3]<=0;
+				end
+			end
 			bchHdr<=0;
 			bchCode[0]<=0;
 			bchCode[1]<=0;
@@ -170,52 +240,58 @@ begin
 			bchCode[3]<=0;
 			dataOffset<=0;
 		end
-		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE)
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE))
 		begin
 			dataGuardBand<=0;
-			dataChannel0<={dataOffset?1:0, ECC(bchHdr, packetHeader[0], dataOffset<24), vSync, hSync};
+			dataChannel0<={dataOffset?1'b1:1'b0, ECC(bchHdr, packetHeader[0], dataOffset<24?1'b1:1'b0), vSync, hSync};
 			dataChannel1<={
-				ECC2a(bchCode[3], subpacket[3][0], subpacket[3][1], dataOffset<28),
-				ECC2a(bchCode[2], subpacket[2][0], subpacket[2][1], dataOffset<28),
-				ECC2a(bchCode[1], subpacket[1][0], subpacket[1][1], dataOffset<28),
-				ECC2a(bchCode[0], subpacket[0][0], subpacket[0][1], dataOffset<28)
+				ECC2a(bchCode[3], subpacket[3][0], subpacket[3][1], (dataOffset<5'd28)?1'b1:1'b0),
+				ECC2a(bchCode[2], subpacket[2][0], subpacket[2][1], (dataOffset<5'd28)?1'b1:1'b0),
+				ECC2a(bchCode[1], subpacket[1][0], subpacket[1][1], (dataOffset<5'd28)?1'b1:1'b0),
+				ECC2a(bchCode[0], subpacket[0][0], subpacket[0][1], (dataOffset<5'd28)?1'b1:1'b0)
 				};
 			dataChannel2<={
-				ECC2b(bchCode[3], subpacket[3][0], subpacket[3][1], dataOffset<28),
-				ECC2b(bchCode[2], subpacket[2][0], subpacket[2][1], dataOffset<28),
-				ECC2b(bchCode[1], subpacket[1][0], subpacket[1][1], dataOffset<28),
-				ECC2b(bchCode[0], subpacket[0][0], subpacket[0][1], dataOffset<28)
+				ECC2b(bchCode[3], subpacket[3][0], subpacket[3][1], ((dataOffset<5'd28)?1'b1:1'b0)),
+				ECC2b(bchCode[2], subpacket[2][0], subpacket[2][1], ((dataOffset<5'd28)?1'b1:1'b0)),
+				ECC2b(bchCode[1], subpacket[1][0], subpacket[1][1], ((dataOffset<5'd28)?1'b1:1'b0)),
+				ECC2b(bchCode[0], subpacket[0][0], subpacket[0][1], ((dataOffset<5'd28)?1'b1:1'b0))
 				};
+			ECCu(bchHdr, packetHeader[0], dataOffset<24?1'b1:1'b0);
+			ECC2u(bchCode[3], subpacket[3][0], subpacket[3][1], dataOffset<28?1'b1:1'b0);
+			ECC2u(bchCode[2], subpacket[2][0], subpacket[2][1], dataOffset<28?1'b1:1'b0);
+			ECC2u(bchCode[1], subpacket[1][0], subpacket[1][1], dataOffset<28?1'b1:1'b0);
+			ECC2u(bchCode[0], subpacket[0][0], subpacket[0][1], dataOffset<28?1'b1:1'b0);
 			packetHeader<=packetHeader[23:1];
 			subpacket[0]<=subpacket[0][55:2];
 			subpacket[1]<=subpacket[1][55:2];
 			subpacket[2]<=subpacket[2][55:2];
 			subpacket[3]<=subpacket[3][55:2];
-			dataOffset<=dataOffset+1;
+			dataOffset<=dataOffset+5'b1;
 		end
-		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND)
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND))
 		begin
 			dataGuardBand<=1;
+			dataChannel0<={1'b1, 1'b1, vSync, hSync};
 		end
-		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND+`CTL_GAP)
+		else
 		begin
 			tercData<=0;
 			dataGuardBand<=0;
 		end
-		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND+`CTL_GAP+`VIDEO_PREAMBLE)
-		begin
-			preamble<='b1000;
-		end
-		else
-		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND+`CTL_GAP+`VIDEO_PREAMBLE+`VIDEO_GUARDBAND)
-		begin
-			preamble<=0;
-			videoGuardBand<=1;
-		end
-		else
-		begin
-			videoGuardBand<=0;
-		end
+	end
+	
+	if (CounterX>=(`CTL_END+`VIDEO_PREAMBLE))
+	begin
+		preamble<=0;
+		videoGuardBand<=1;
+	end
+	else if (CounterX>=(`CTL_END))
+	begin
+		preamble<='b0001;
+	end
+	else
+	begin
+		videoGuardBand<=0;
 	end
 end
 
@@ -272,18 +348,25 @@ end
 
 ////////////////////////////////////////////////////////////////////////
 wire [9:0] TMDS_red, TMDS_green, TMDS_blue;
-TMDS_encoder encode_R(.clk(pixclk), .VD(red  ), .CD(preamble[1:0]), .VDE(DrawArea), .TMDS(TMDS_red));
-TMDS_encoder encode_G(.clk(pixclk), .VD(green), .CD(preamble[3:2]), .VDE(DrawArea), .TMDS(TMDS_green));
+TMDS_encoder encode_R(.clk(pixclk), .VD(red  ), .CD(preamble[3:2]), .VDE(DrawArea), .TMDS(TMDS_red));
+TMDS_encoder encode_G(.clk(pixclk), .VD(green), .CD(preamble[1:0]), .VDE(DrawArea), .TMDS(TMDS_green));
 TMDS_encoder encode_B(.clk(pixclk), .VD(blue ), .CD({vSync,hSync}), .VDE(DrawArea), .TMDS(TMDS_blue));
 
 wire [9:0] TERC4_red, TERC4_green, TERC4_blue;
-TERC4_encoder encode_R4(.clk(pixclk), .data(dataChannel2), .TERC4(TERC4_red));
-TERC4_encoder encode_G4(.clk(pixclk), .data(dataChannel1), .TERC4(TERC4_green));
-TERC4_encoder encode_B4(.clk(pixclk), .data(dataChannel0), .TERC4(TERC4_blue));
+TERC4_encoder encode_R4(.clk(pixclk), .data(dataChannel2), .TERC(TERC4_red));
+TERC4_encoder encode_G4(.clk(pixclk), .data(dataChannel1), .TERC(TERC4_green));
+TERC4_encoder encode_B4(.clk(pixclk), .data(dataChannel0), .TERC(TERC4_blue));
 
-wire redSource = videoGuardBand ? : 10'b1011001100 : (dataGuardBand ? 10'b0100110011 : (tercData ? TERC4_red : TMDS_red));
-wire greenSource = (dataGuardBand || videoGuardBand) ? 10'b0100110011 : (tercData ? TERC4_green : TMDS_green);
-wire blueSource = videoGuardBand ? 10'b1011001100 : (tercData ? TERC4_blue : TMDS_blue);
+always @(posedge pixclk)
+begin
+	tercDataDelayed<=tercData;	// To account for delay through encoder
+	videoGuardBandDelayed<=videoGuardBand;
+	dataGuardBandDelayed<=dataGuardBand;
+end
+
+wire [9:0] redSource = videoGuardBandDelayed ? 10'b1011001100 : (dataGuardBandDelayed ? 10'b0100110011 : (tercDataDelayed ? TERC4_red : TMDS_red));
+wire [9:0] greenSource = (dataGuardBandDelayed || videoGuardBandDelayed) ? 10'b0100110011 : (tercDataDelayed ? TERC4_green : TMDS_green);
+wire [9:0] blueSource = videoGuardBandDelayed ? 10'b1011001100 : (tercDataDelayed ? TERC4_blue : TMDS_blue);
 
 ////////////////////////////////////////////////////////////////////////
 reg [3:0] TMDS_mod10;  // modulus 10 counter
@@ -361,7 +444,7 @@ module TERC4_encoder(
 
 always @(posedge clk)
 begin
-	case (data):
+	case (data)
 		4'b0000: TERC <= 10'b1010011100;
 		4'b0001: TERC <= 10'b1001100011;
 		4'b0010: TERC <= 10'b1011100100;
