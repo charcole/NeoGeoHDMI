@@ -34,16 +34,23 @@ reg [3:0] preamble;
 reg dataGuardBand;
 reg videoGuardBand;
 reg [23:0] packetHeader;
+reg [23:0] packetHeader2;
 reg [7:0]  bchHdr;
 reg [55:0] subpacket [3:0];
+reg [55:0] subpacket2[3:0];
 reg [7:0]  bchCode [3:0];
 reg [4:0]  dataOffset;
+reg [4:0]  dataOffset2;
 reg [191:0] channelStatus;
-reg [5:0] channelStatusIdx;
+reg [7:0] channelStatusIdx;
 reg tercDataDelayed;
 reg videoGuardBandDelayed;
 reg dataGuardBandDelayed;
 reg [24:0] samplesNeeded;
+reg [15:0] audioTimer;
+reg [9:0] audioSamples;
+reg [15:0] sample;
+reg sampleDir;
 
 initial
 begin
@@ -64,22 +71,31 @@ begin
  dataGuardBand=0;
  videoGuardBand=0;
  packetHeader=0;
+ packetHeader2=0;
  bchHdr=0;
  subpacket[0]=0;
  subpacket[1]=0;
  subpacket[2]=0;
  subpacket[3]=0;
+ subpacket2[0]=0;
+ subpacket2[1]=0;
+ subpacket2[2]=0;
+ subpacket2[3]=0;
  bchCode[0]=0;
  bchCode[1]=0;
  bchCode[2]=0;
  bchCode[3]=0;
  dataOffset=0;
+ dataOffset2=0;
  channelStatus=0;
  channelStatusIdx=0;
  tercDataDelayed=0;
  videoGuardBandDelayed=0;
  dataGuardBandDelayed=0;
  samplesNeeded=0;
+ audioTimer=0;
+ sample=0;
+ sampleDir=0;
 end
 
 `define DISPLAY_WIDTH 640 //720 //640
@@ -107,7 +123,7 @@ always @(posedge pixclk) DrawArea <= (CounterX<`DISPLAY_WIDTH) && (CounterY<`DIS
 always @(posedge pixclk) hSync <= (CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC));
 always @(posedge pixclk) vSync <= (CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH)) && (CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC));
 
-`define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+8)
+`define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+4)
 `define DATA_PREAMBLE	8
 `define DATA_GUARDBAND	2
 `define DATA_SIZE			32
@@ -172,27 +188,33 @@ task ECC2u;
 	end
 endtask
 
+localparam [191:0] CSB = 192'h00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_C2_03_00_40_04;
+
 always @(posedge pixclk)
 begin
-	if (CounterY<136 && CounterX>=`DATA_START)
+	if (audioTimer==749) begin
+		audioTimer<=0;
+		
+		if (!sampleDir) begin
+			sample<=sample+268;
+			if (!sample[15] && sample>'h4000)
+				sampleDir<=1;
+		end else begin
+			sample<=sample-268;
+			if (sample[15] && sample<'hc000)
+				sampleDir<=0;
+		end
+		
+		samplesNeeded<=samplesNeeded+1;
+	end else begin
+		audioTimer<=audioTimer+1;
+	end
+
+	if (CounterX>=`DATA_START)
 	begin
 		if (CounterX<(`DATA_START+`DATA_PREAMBLE))
 		begin
 			preamble<='b0101;
-			if (CounterX==`DATA_START) begin
-				if (CounterY==2) begin
-					if (channelStatusIdx==0) begin
-						channelStatus<=192'h00000000000000000000000000000000000000C203004004;
-					end
-					samplesNeeded<=samplesNeeded+1600;
-				end else begin
-					channelStatus[187:0]<=channelStatus[191:4];
-					channelStatus[191:188]<=channelStatus[3:0];
-					channelStatusIdx<=(channelStatusIdx<47)?channelStatusIdx+1:0;
-					if (samplesNeeded>=12)
-						samplesNeeded<=samplesNeeded-12;
-				end
-			end
 		end
 		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND))
 		begin
@@ -200,45 +222,70 @@ begin
 			dataGuardBand<=1;
 			dataChannel0<={1'b1, 1'b1, vSync, hSync};
 			preamble<=0;
-			if (CounterY==0) begin
-				packetHeader<=24'h0D0282;	// infoframe AVI packet
-				subpacket[0]<=56'h0000010008009c;
-				subpacket[1]<=56'h0501000005bf00;
-				subpacket[2]<=56'h00000000000000;
-				subpacket[3]<=56'h00000000000000;
-			end else if (CounterY==1) begin
-				packetHeader<=24'h0A0184;	// infoframe audio packet
-				subpacket[0]<=56'h00000000000170;
-				subpacket[1]<=56'h00000000000000;
-				subpacket[2]<=56'h00000000000000;
-				subpacket[3]<=56'h00000000000000;
-			end else if (CounterY==2) begin
+			if (audioSamples[4:0]==0) begin
 				packetHeader<=24'h000001;	// audio clock regeneration packet (N=0x1000 CTS=0x6270)
-				subpacket[0]<=56'h00100070620000;
-				subpacket[1]<=56'h00100070620000;
-				subpacket[2]<=56'h00100070620000;
-				subpacket[3]<=56'h00100070620000;
+				subpacket[0]<=56'h001000c05d0000;	// N=0x1000 CTS=0x5dc0
+				subpacket[1]<=56'h001000c05d0000;
+				subpacket[2]<=56'h001000c05d0000;
+				subpacket[3]<=56'h001000c05d0000;
 			end else begin
-				if (samplesNeeded>=12) begin
-					packetHeader<=24'h000F02|(channelStatusIdx==0?24'h100000:24'h0);	// audio sample
-					subpacket[0]<=56'h99000000100100|(channelStatus[0]?56'h44000000000000:56'h0);
-					subpacket[1]<=56'h99000000110000|(channelStatus[1]?56'h44000000000000:56'h0);
-					subpacket[2]<=56'h99000000100100|(channelStatus[2]?56'h44000000000000:56'h0);
-					subpacket[3]<=56'h99000000010100|(channelStatus[3]?56'h44000000000000:56'h0);
+				if (!CounterY[0]) begin
+					packetHeader<=24'h0D0282;	// infoframe AVI packet
+					subpacket[0]<=56'h0000010019107b;
+					subpacket[1]<=56'h0501000005bf00;
+					subpacket[2]<=56'h00000000000000;
+					subpacket[3]<=56'h00000000000000;
 				end else begin
-					packetHeader<=0;
-					subpacket[0]<=0;
-					subpacket[1]<=0;
-					subpacket[2]<=0;
-					subpacket[3]<=0;
+					packetHeader<=24'h0A0184;	// infoframe audio packet
+					subpacket[0]<=56'h0000000000115f;
+					subpacket[1]<=56'h00000000000000;
+					subpacket[2]<=56'h00000000000000;
+					subpacket[3]<=56'h00000000000000;
 				end
 			end
+			
+			if (packetHeader2==0 || audioSamples[4:0]!=0) begin
+				if (samplesNeeded>0) begin
+					if (packetHeader2==0) begin
+						packetHeader2<=24'h000102|(channelStatusIdx==0?24'h100000:24'h0);	// audio sample
+						/*
+						case (audioSamples[7:6])
+							0: subpacket2[0]<=56'h00110000110000|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+							1: subpacket2[0]<=56'h00100100100100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+							2: subpacket2[0]<=56'h00010100010100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+							3: subpacket2[0]<=56'h00100100100100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+						endcase
+						*/
+						subpacket2[0]<=((sample<<8)|(sample<<32)|((^sample)?56'h88000000000000:56'h0))^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+						subpacket2[1]<=56'h99000000000000;
+						subpacket2[2]<=56'h99000000000000;
+						subpacket2[3]<=56'h99000000000000;
+					end else begin
+						packetHeader2<=packetHeader2|24'h000200|(channelStatusIdx==0?24'h200000:24'h0);
+						/*case (audioSamples[7:6])
+							0: subpacket2[1]<=56'h00110000110000|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+							1: subpacket2[1]<=56'h00100100100100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+							2: subpacket2[1]<=56'h00010100010100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+							3: subpacket2[1]<=56'h00100100100100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+						endcase*/
+						subpacket2[1]<=((sample<<8)|(sample<<32)|((^sample)?56'h88000000000000:56'h0))^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+					end
+					if (channelStatusIdx<191)
+						channelStatusIdx<=channelStatusIdx+1;
+					else
+						channelStatusIdx<=0;
+					samplesNeeded<=samplesNeeded-1+((audioTimer==749)?1:0);
+					audioSamples<=audioSamples+1;
+				end
+			end
+			
 			bchHdr<=0;
 			bchCode[0]<=0;
 			bchCode[1]<=0;
 			bchCode[2]<=0;
 			bchCode[3]<=0;
 			dataOffset<=0;
+			dataOffset2<=0;
 		end
 		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE))
 		begin
@@ -268,10 +315,37 @@ begin
 			subpacket[3]<=subpacket[3][55:2];
 			dataOffset<=dataOffset+5'b1;
 		end
-		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_GUARDBAND))
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE))
+		begin
+			dataChannel0<={1'b1, ECC(bchHdr, packetHeader2[0], dataOffset2<24?1'b1:1'b0), vSync, hSync};
+			dataChannel1<={
+				ECC2a(bchCode[3], subpacket2[3][0], subpacket2[3][1], (dataOffset2<5'd28)?1'b1:1'b0),
+				ECC2a(bchCode[2], subpacket2[2][0], subpacket2[2][1], (dataOffset2<5'd28)?1'b1:1'b0),
+				ECC2a(bchCode[1], subpacket2[1][0], subpacket2[1][1], (dataOffset2<5'd28)?1'b1:1'b0),
+				ECC2a(bchCode[0], subpacket2[0][0], subpacket2[0][1], (dataOffset2<5'd28)?1'b1:1'b0)
+				};
+			dataChannel2<={
+				ECC2b(bchCode[3], subpacket2[3][0], subpacket2[3][1], ((dataOffset2<5'd28)?1'b1:1'b0)),
+				ECC2b(bchCode[2], subpacket2[2][0], subpacket2[2][1], ((dataOffset2<5'd28)?1'b1:1'b0)),
+				ECC2b(bchCode[1], subpacket2[1][0], subpacket2[1][1], ((dataOffset2<5'd28)?1'b1:1'b0)),
+				ECC2b(bchCode[0], subpacket2[0][0], subpacket2[0][1], ((dataOffset2<5'd28)?1'b1:1'b0))
+				};
+			ECCu(bchHdr, packetHeader2[0], dataOffset2<24?1'b1:1'b0);
+			ECC2u(bchCode[3], subpacket2[3][0], subpacket2[3][1], dataOffset2<28?1'b1:1'b0);
+			ECC2u(bchCode[2], subpacket2[2][0], subpacket2[2][1], dataOffset2<28?1'b1:1'b0);
+			ECC2u(bchCode[1], subpacket2[1][0], subpacket2[1][1], dataOffset2<28?1'b1:1'b0);
+			ECC2u(bchCode[0], subpacket2[0][0], subpacket2[0][1], dataOffset2<28?1'b1:1'b0);
+			packetHeader2<=packetHeader2[23:1];
+			subpacket2[0]<=subpacket2[0][55:2];
+			subpacket2[1]<=subpacket2[1][55:2];
+			subpacket2[2]<=subpacket2[2][55:2];
+			subpacket2[3]<=subpacket2[3][55:2];
+			dataOffset2<=dataOffset2+1;
+		end
+		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE+`DATA_GUARDBAND))
 		begin
 			dataGuardBand<=1;
-			dataChannel0<={1'b1, 1'b1, vSync, hSync};
+			dataChannel0<={1'b1, 1'b1, vSync, hSync};	
 		end
 		else
 		begin
