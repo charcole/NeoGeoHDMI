@@ -52,6 +52,11 @@ reg [9:0] audioSamples;
 reg [15:0] sample;
 reg sampleDir;
 
+reg [15:0] samplex;
+reg [15:0] sampley;
+reg [4:0] sineSign;
+reg [1:0] sinePhase;
+
 initial
 begin
  CounterX=0;
@@ -96,6 +101,10 @@ begin
  audioTimer=0;
  sample=0;
  sampleDir=0;
+ samplex=0;
+ sampley=0;
+ sineSign=0;
+ sinePhase=0;
 end
 
 `define DISPLAY_WIDTH 640 //720 //640
@@ -195,15 +204,23 @@ begin
 	if (audioTimer==749) begin
 		audioTimer<=0;
 		
-		if (!sampleDir) begin
-			sample<=sample+268;
-			if (!sample[15] && sample>'h4000)
-				sampleDir<=1;
+		if (sineSign==30) begin
+			samplex<='h7ff8;
+			sampley<=0;
+			sineSign<=0;
+			sinePhase<=sinePhase+1;
 		end else begin
-			sample<=sample-268;
-			if (sample[15] && sample<'hc000)
-				sampleDir<=0;
+			sineSign<=sineSign+1;
+			samplex<=(samplex*'h7fd5-sampley*'h67b)>>15;
+			sampley<=(samplex*'h67b+sampley*'h7fd5)>>15;
 		end
+		
+		case (sinePhase)
+			0: sample<=sampley;
+			1: sample<=samplex;
+			2: sample<=-sampley;
+			3: sample<=-samplex;
+		endcase
 		
 		samplesNeeded<=samplesNeeded+1;
 	end else begin
