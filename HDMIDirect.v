@@ -54,8 +54,11 @@ reg sampleDir;
 
 reg [15:0] samplex;
 reg [15:0] sampley;
-reg [4:0] sineSign;
+reg [10:0] sineSign;
 reg [1:0] sinePhase;
+reg [5:0] frames;
+reg [2:0] note;
+reg [6:0] musicTimer;
 
 initial
 begin
@@ -105,6 +108,9 @@ begin
  sampley=0;
  sineSign=0;
  sinePhase=0;
+ frames=0;
+ note=0;
+ musicTimer=0;
 end
 
 `define DISPLAY_WIDTH 640 //720 //640
@@ -201,27 +207,65 @@ localparam [191:0] CSB = 192'h00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00
 
 always @(posedge pixclk)
 begin
-	if (audioTimer==749) begin
-		audioTimer<=0;
-		
-		if (sineSign==30) begin
-			samplex<='h7ff8;
+
+	if (CounterY==0 && CounterX==0) begin
+		frames<=frames+1;
+	end
+
+	if (musicTimer==0) begin
+		if ((note==0 && sineSign>=478/4) ||
+			(note==1 && sineSign>=426/4) ||
+			(note==2 && sineSign>=506/4) ||
+			(note==3 && sineSign>=506/4) ||
+			(note==4 && sineSign>=1077/4) ||
+			(note==5 && sineSign>=715/4) ||
+			(note==6 && sineSign>=715/4) ||
+			(note==7 && sineSign>=715/4))
+		begin
+			samplex<='h7fff;
 			sampley<=0;
 			sineSign<=0;
 			sinePhase<=sinePhase+1;
+			if (frames>=20) begin
+				note<=note+1;
+				frames<=0;
+			end
 		end else begin
 			sineSign<=sineSign+1;
-			samplex<=(samplex*'h7fd5-sampley*'h67b)>>15;
-			sampley<=(samplex*'h67b+sampley*'h7fd5)>>15;
+			case (note)
+				0:	begin 
+					samplex<=(samplex*'h7ffd-sampley*'h1ae)>>15;
+					sampley<=(samplex*'h1ae+sampley*'h7ffd)>>15;
+				end
+				1:	begin 
+					samplex<=(samplex*'h7ffc-sampley*'h1e3)>>15;
+					sampley<=(samplex*'h1e3+sampley*'h7ffc)>>15;
+				end
+				2,3:	begin 
+					samplex<=(samplex*'h7ffd-sampley*'h196)>>15;
+					sampley<=(samplex*'h196+sampley*'h7ffd)>>15;
+				end
+				4:	begin 
+					samplex<=(samplex*'h7fff-sampley*'hbf)>>15;
+					sampley<=(samplex*'hbf+sampley*'h7fff)>>15;
+				end
+				5,6,7:	begin 
+					samplex<=(samplex*'h7ffe-sampley*'h11f)>>15;
+					sampley<=(samplex*'h11f+sampley*'h7ffe)>>15;
+				end
+			endcase
 		end
-		
+	end
+	musicTimer<=musicTimer+1;
+
+	if (audioTimer==749) begin
+		audioTimer<=0;
 		case (sinePhase)
 			0: sample<=sampley;
 			1: sample<=samplex;
 			2: sample<=-sampley;
 			3: sample<=-samplex;
 		endcase
-		
 		samplesNeeded<=samplesNeeded+1;
 	end else begin
 		audioTimer<=audioTimer+1;
