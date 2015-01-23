@@ -8,6 +8,9 @@ module HDMIDirectV(
 	input dak, sha,
 	input button,
 	input sync,
+	input audioLR,
+	input audioClk,
+	input audioData,
 	output [2:0] TMDSp, TMDSn,
 	output TMDSp_clock, TMDSn_clock,
 	output [10:0] videoaddressw,
@@ -46,19 +49,12 @@ reg [7:0] channelStatusIdx;
 reg tercDataDelayed;
 reg videoGuardBandDelayed;
 reg dataGuardBandDelayed;
-reg [24:0] samplesNeeded;
+reg [4:0] samplesNeeded;
 reg [15:0] audioTimer;
 reg [9:0] audioSamples;
-reg [15:0] sample;
-reg sampleDir;
-
-reg [15:0] samplex;
-reg [15:0] sampley;
-reg [10:0] sineSign;
-reg [1:0] sinePhase;
-reg [5:0] frames;
-reg [2:0] note;
-reg [6:0] musicTimer;
+reg [15:0] sampleL;
+reg [15:0] sampleR;
+reg [15:0] audioInput [1:0];
 
 initial
 begin
@@ -102,15 +98,10 @@ begin
  dataGuardBandDelayed=0;
  samplesNeeded=0;
  audioTimer=0;
- sample=0;
- sampleDir=0;
- samplex=0;
- sampley=0;
- sineSign=0;
- sinePhase=0;
- frames=0;
- note=0;
- musicTimer=0;
+ sampleL=0;
+ sampleR=0;
+ audioInput[0]=0;
+ audioInput[1]=0;
 end
 
 `define DISPLAY_WIDTH 640 //720 //640
@@ -137,6 +128,9 @@ always @(posedge pixclk) DrawArea <= (CounterX<`DISPLAY_WIDTH) && (CounterY<`DIS
 
 always @(posedge pixclk) hSync <= (CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC));
 always @(posedge pixclk) vSync <= (CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH)) && (CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC));
+
+always @(posedge audioClk) if (audioLR) audioInput[0]<=(audioInput[0]<<1)|audioData; else audioInput[1]<=(audioInput[1]<<1)|audioData;
+always @(negedge audioLR) begin sampleL<=audioInput[0]; sampleR<=audioInput[1]; end
 
 `define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+4)
 `define DATA_PREAMBLE	8
@@ -207,65 +201,8 @@ localparam [191:0] CSB = 192'h00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00
 
 always @(posedge pixclk)
 begin
-
-	if (CounterY==0 && CounterX==0) begin
-		frames<=frames+1;
-	end
-
-	if (musicTimer==0) begin
-		if ((note==0 && sineSign>=478/4) ||
-			(note==1 && sineSign>=426/4) ||
-			(note==2 && sineSign>=506/4) ||
-			(note==3 && sineSign>=506/4) ||
-			(note==4 && sineSign>=1077/4) ||
-			(note==5 && sineSign>=715/4) ||
-			(note==6 && sineSign>=715/4) ||
-			(note==7 && sineSign>=715/4))
-		begin
-			samplex<='h7fff;
-			sampley<=0;
-			sineSign<=0;
-			sinePhase<=sinePhase+1;
-			if (frames>=20) begin
-				note<=note+1;
-				frames<=0;
-			end
-		end else begin
-			sineSign<=sineSign+1;
-			case (note)
-				0:	begin 
-					samplex<=(samplex*'h7ffd-sampley*'h1ae)>>15;
-					sampley<=(samplex*'h1ae+sampley*'h7ffd)>>15;
-				end
-				1:	begin 
-					samplex<=(samplex*'h7ffc-sampley*'h1e3)>>15;
-					sampley<=(samplex*'h1e3+sampley*'h7ffc)>>15;
-				end
-				2,3:	begin 
-					samplex<=(samplex*'h7ffd-sampley*'h196)>>15;
-					sampley<=(samplex*'h196+sampley*'h7ffd)>>15;
-				end
-				4:	begin 
-					samplex<=(samplex*'h7fff-sampley*'hbf)>>15;
-					sampley<=(samplex*'hbf+sampley*'h7fff)>>15;
-				end
-				5,6,7:	begin 
-					samplex<=(samplex*'h7ffe-sampley*'h11f)>>15;
-					sampley<=(samplex*'h11f+sampley*'h7ffe)>>15;
-				end
-			endcase
-		end
-	end
-	musicTimer<=musicTimer+1;
-
 	if (audioTimer==749) begin
 		audioTimer<=0;
-		case (sinePhase)
-			0: sample<=sampley;
-			1: sample<=samplex;
-			2: sample<=-sampley;
-			3: sample<=-samplex;
-		endcase
 		samplesNeeded<=samplesNeeded+1;
 	end else begin
 		audioTimer<=audioTimer+1;
@@ -309,27 +246,19 @@ begin
 				if (samplesNeeded>0) begin
 					if (packetHeader2==0) begin
 						packetHeader2<=24'h000102|(channelStatusIdx==0?24'h100000:24'h0);	// audio sample
-						/*
-						case (audioSamples[7:6])
-							0: subpacket2[0]<=56'h00110000110000|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-							1: subpacket2[0]<=56'h00100100100100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-							2: subpacket2[0]<=56'h00010100010100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-							3: subpacket2[0]<=56'h00100100100100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-						endcase
-						*/
-						subpacket2[0]<=((sample<<8)|(sample<<32)|((^sample)?56'h88000000000000:56'h0))^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+						subpacket2[0]<=((sampleL<<8)|(sampleR<<32)
+							|((^sampleL)?56'h08000000000000:56'h0)
+							|((^sampleR)?56'h80000000000000:56'h0))
+							^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
 						subpacket2[1]<=56'h99000000000000;
 						subpacket2[2]<=56'h99000000000000;
 						subpacket2[3]<=56'h99000000000000;
 					end else begin
 						packetHeader2<=packetHeader2|24'h000200|(channelStatusIdx==0?24'h200000:24'h0);
-						/*case (audioSamples[7:6])
-							0: subpacket2[1]<=56'h00110000110000|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-							1: subpacket2[1]<=56'h00100100100100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-							2: subpacket2[1]<=56'h00010100010100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-							3: subpacket2[1]<=56'h00100100100100|(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-						endcase*/
-						subpacket2[1]<=((sample<<8)|(sample<<32)|((^sample)?56'h88000000000000:56'h0))^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+						subpacket2[1]<=((sampleL<<8)|(sampleR<<32)
+							|((^sampleL)?56'h08000000000000:56'h0)
+							|((^sampleR)?56'h80000000000000:56'h0))
+							^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
 					end
 					if (channelStatusIdx<191)
 						channelStatusIdx<=channelStatusIdx+1;
