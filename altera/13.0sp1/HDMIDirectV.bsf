@@ -1,0 +1,197 @@
+/*
+WARNING: Do NOT edit the input and output ports in this file in a text
+editor if you plan to continue editing the block that represents it in
+the Block Editor! File corruption is VERY likely to occur.
+*/
+/*
+Copyright (C) 1991-2013 Altera Corporation
+Your use of Altera Corporation's design tools, logic functions 
+and other software and tools, and its AMPP partner logic 
+functions, and any output files from any of the foregoing 
+(including device programming or simulation files), and any 
+associated documentation or information are expressly subject 
+to the terms and conditions of the Altera Program License 
+Subscription Agreement, Altera MegaCore Function License 
+Agreement, or other applicable license agreement, including, 
+without limitation, that your use is for the sole purpose of 
+programming logic devices manufactured by Altera and sold by 
+Altera or its authorized distributors.  Please refer to the 
+applicable agreement for further details.
+*/
+(header "symbol" (version "1.1"))
+(symbol
+	(rect 16 16 272 288)
+	(text "HDMIDirectV" (rect 5 0 61 12)(font "Arial" ))
+	(text "inst" (rect 8 256 20 268)(font "Arial" ))
+	(port
+		(pt 0 32)
+		(input)
+		(text "pixclk" (rect 0 0 21 12)(font "Arial" ))
+		(text "pixclk" (rect 21 27 42 39)(font "Arial" ))
+		(line (pt 0 32)(pt 16 32)(line_width 1))
+	)
+	(port
+		(pt 0 48)
+		(input)
+		(text "clk_TMDS" (rect 0 0 43 12)(font "Arial" ))
+		(text "clk_TMDS" (rect 21 43 64 55)(font "Arial" ))
+		(line (pt 0 48)(pt 16 48)(line_width 1))
+	)
+	(port
+		(pt 0 64)
+		(input)
+		(text "videobus[16..0]" (rect 0 0 59 12)(font "Arial" ))
+		(text "videobus[16..0]" (rect 21 59 80 71)(font "Arial" ))
+		(line (pt 0 64)(pt 16 64)(line_width 3))
+	)
+	(port
+		(pt 0 80)
+		(input)
+		(text "Rin[4..0]" (rect 0 0 35 12)(font "Arial" ))
+		(text "Rin[4..0]" (rect 21 75 56 87)(font "Arial" ))
+		(line (pt 0 80)(pt 16 80)(line_width 3))
+	)
+	(port
+		(pt 0 96)
+		(input)
+		(text "Gin[4..0]" (rect 0 0 34 12)(font "Arial" ))
+		(text "Gin[4..0]" (rect 21 91 55 103)(font "Arial" ))
+		(line (pt 0 96)(pt 16 96)(line_width 3))
+	)
+	(port
+		(pt 0 112)
+		(input)
+		(text "Bin[4..0]" (rect 0 0 33 12)(font "Arial" ))
+		(text "Bin[4..0]" (rect 21 107 54 119)(font "Arial" ))
+		(line (pt 0 112)(pt 16 112)(line_width 3))
+	)
+	(port
+		(pt 0 128)
+		(input)
+		(text "dak" (rect 0 0 14 12)(font "Arial" ))
+		(text "dak" (rect 21 123 35 135)(font "Arial" ))
+		(line (pt 0 128)(pt 16 128)(line_width 1))
+	)
+	(port
+		(pt 0 144)
+		(input)
+		(text "sha" (rect 0 0 14 12)(font "Arial" ))
+		(text "sha" (rect 21 139 35 151)(font "Arial" ))
+		(line (pt 0 144)(pt 16 144)(line_width 1))
+	)
+	(port
+		(pt 0 160)
+		(input)
+		(text "button" (rect 0 0 23 12)(font "Arial" ))
+		(text "button" (rect 21 155 44 167)(font "Arial" ))
+		(line (pt 0 160)(pt 16 160)(line_width 1))
+	)
+	(port
+		(pt 0 176)
+		(input)
+		(text "sync" (rect 0 0 20 12)(font "Arial" ))
+		(text "sync" (rect 21 171 41 183)(font "Arial" ))
+		(line (pt 0 176)(pt 16 176)(line_width 1))
+	)
+	(port
+		(pt 0 192)
+		(input)
+		(text "audioLR" (rect 0 0 34 12)(font "Arial" ))
+		(text "audioLR" (rect 21 187 55 199)(font "Arial" ))
+		(line (pt 0 192)(pt 16 192)(line_width 1))
+	)
+	(port
+		(pt 0 208)
+		(input)
+		(text "audioClk" (rect 0 0 33 12)(font "Arial" ))
+		(text "audioClk" (rect 21 203 54 215)(font "Arial" ))
+		(line (pt 0 208)(pt 16 208)(line_width 1))
+	)
+	(port
+		(pt 0 224)
+		(input)
+		(text "audioData" (rect 0 0 38 12)(font "Arial" ))
+		(text "audioData" (rect 21 219 59 231)(font "Arial" ))
+		(line (pt 0 224)(pt 16 224)(line_width 1))
+	)
+	(port
+		(pt 256 32)
+		(output)
+		(text "TMDSp[2..0]" (rect 0 0 51 12)(font "Arial" ))
+		(text "TMDSp[2..0]" (rect 184 27 235 39)(font "Arial" ))
+		(line (pt 256 32)(pt 240 32)(line_width 3))
+	)
+	(port
+		(pt 256 48)
+		(output)
+		(text "TMDSn[2..0]" (rect 0 0 51 12)(font "Arial" ))
+		(text "TMDSn[2..0]" (rect 184 43 235 55)(font "Arial" ))
+		(line (pt 256 48)(pt 240 48)(line_width 3))
+	)
+	(port
+		(pt 256 64)
+		(output)
+		(text "TMDSp_clock" (rect 0 0 57 12)(font "Arial" ))
+		(text "TMDSp_clock" (rect 178 59 235 71)(font "Arial" ))
+		(line (pt 256 64)(pt 240 64)(line_width 1))
+	)
+	(port
+		(pt 256 80)
+		(output)
+		(text "TMDSn_clock" (rect 0 0 57 12)(font "Arial" ))
+		(text "TMDSn_clock" (rect 178 75 235 87)(font "Arial" ))
+		(line (pt 256 80)(pt 240 80)(line_width 1))
+	)
+	(port
+		(pt 256 96)
+		(output)
+		(text "videoaddressw[10..0]" (rect 0 0 82 12)(font "Arial" ))
+		(text "videoaddressw[10..0]" (rect 153 91 235 103)(font "Arial" ))
+		(line (pt 256 96)(pt 240 96)(line_width 3))
+	)
+	(port
+		(pt 256 112)
+		(output)
+		(text "videoramenable" (rect 0 0 62 12)(font "Arial" ))
+		(text "videoramenable" (rect 173 107 235 119)(font "Arial" ))
+		(line (pt 256 112)(pt 240 112)(line_width 1))
+	)
+	(port
+		(pt 256 128)
+		(output)
+		(text "videoramclk" (rect 0 0 48 12)(font "Arial" ))
+		(text "videoramclk" (rect 187 123 235 135)(font "Arial" ))
+		(line (pt 256 128)(pt 240 128)(line_width 1))
+	)
+	(port
+		(pt 256 144)
+		(output)
+		(text "videoramoutclk" (rect 0 0 60 12)(font "Arial" ))
+		(text "videoramoutclk" (rect 175 139 235 151)(font "Arial" ))
+		(line (pt 256 144)(pt 240 144)(line_width 1))
+	)
+	(port
+		(pt 256 160)
+		(output)
+		(text "videowrite" (rect 0 0 38 12)(font "Arial" ))
+		(text "videowrite" (rect 197 155 235 167)(font "Arial" ))
+		(line (pt 256 160)(pt 240 160)(line_width 1))
+	)
+	(port
+		(pt 256 176)
+		(output)
+		(text "videoaddressoutw[10..0]" (rect 0 0 94 12)(font "Arial" ))
+		(text "videoaddressoutw[10..0]" (rect 141 171 235 183)(font "Arial" ))
+		(line (pt 256 176)(pt 240 176)(line_width 3))
+	)
+	(port
+		(pt 256 192)
+		(output)
+		(text "videobusoutw[16..0]" (rect 0 0 76 12)(font "Arial" ))
+		(text "videobusoutw[16..0]" (rect 159 187 235 199)(font "Arial" ))
+		(line (pt 256 192)(pt 240 192)(line_width 3))
+	)
+	(drawing
+		(rectangle (rect 16 16 240 256)(line_width 1))
+	)
+)
