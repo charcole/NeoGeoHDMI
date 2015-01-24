@@ -1,6 +1,15 @@
-// (c) fpga4fun.com & KNJN LLC 2013
+// Charlie Cole 2015
+// HDMI output for Neo Geo MVS
+//   Originally based on fpga4fun.com HDMI/DVI sample code (c) fpga4fun.com & KNJN LLC 2013
+//   Added Neo Geo MVS input, scan doubling, HDMI data packets and audio
+//   HDMI output is out of spec by necessity so won't work on all TVs/monitors
+//   Offers fake scanline generation (select via button)
+//		0: Line doubled but even lines are half brightness
+//		1: Line doubled but even lines are half brightness on even frames and vice versa
+//		2: Only show even lines (odd lines are black)
+//		3: Show even lines on even frames, odd lines on odd frames
+//		4: Line doubled
 
-////////////////////////////////////////////////////////////////////////
 module HDMIDirectV(
 	input pixclk, clk_TMDS,  // 24MHz + 120MHz
 	input [16:0] videobus,
@@ -24,81 +33,7 @@ module HDMIDirectV(
 
 ////////////////////////////////////////////////////////////////////////
 
-reg tercData;
-reg [3:0] dataChannel0;
-reg [3:0] dataChannel1;
-reg [3:0] dataChannel2;
-reg [3:0] preamble;
-reg dataGuardBand;
-reg videoGuardBand;
-reg [23:0] packetHeader;
-reg [23:0] packetHeader2;
-reg [7:0]  bchHdr;
-reg [55:0] subpacket [3:0];
-reg [55:0] subpacket2[3:0];
-reg [7:0]  bchCode [3:0];
-reg [4:0]  dataOffset;
-reg [4:0]  dataOffset2;
-reg [191:0] channelStatus;
-reg [7:0] channelStatusIdx;
-reg [10:0] audioTimer;
-reg [9:0] audioSamples;
-reg [1:0] samplesHead;
-reg [15:0] audioInput [1:0];
-reg [15:0] curSampleL;
-reg [15:0] curSampleR;
-reg sendRegenPacket;
-reg [15:0] buttonDebounce;
-
-initial
-begin
- tercData=0;
- dataChannel0=0;
- dataChannel1=0;
- dataChannel2=0;
- preamble=0;
- dataGuardBand=0;
- videoGuardBand=0;
- packetHeader=0;
- packetHeader2=0;
- bchHdr=0;
- subpacket[0]=0;
- subpacket[1]=0;
- subpacket[2]=0;
- subpacket[3]=0;
- subpacket2[0]=0;
- subpacket2[1]=0;
- subpacket2[2]=0;
- subpacket2[3]=0;
- bchCode[0]=0;
- bchCode[1]=0;
- bchCode[2]=0;
- bchCode[3]=0;
- dataOffset=0;
- dataOffset2=0;
- channelStatus=0;
- channelStatusIdx=0;
- tercDataDelayed=0;
- videoGuardBandDelayed=0;
- dataGuardBandDelayed=0;
- audioTimer=0;
- samplesHead=0;
- audioInput[0]=0;
- audioInput[1]=0;
- curSampleL=0;
- curSampleR=0;
- sendRegenPacket=0;
- scanlineType=0;
- buttonDebounce=0;
-end
-
-////////////////////////////////////////////////////////////////////////
-// Line doubler
-// Takes the 480i video data from the NeoGeo and doubles the line
-// frequency by storing a line in RAM and then displaying it twice.
-// Also takes care of centring the picture (using the sync input).
-////////////////////////////////////////////////////////////////////////
-
+// Defines to do with video signal generation
 `define DISPLAY_WIDTH			640
 `define DISPLAY_HEIGHT			480
 `define FULL_WIDTH				768 // Should be 800 for 640x480p
@@ -110,6 +45,22 @@ end
 `define NEOGEO_VSYNC_LENGTH	80
 `define NEOGEO_VSYNC_OFFSET	12	// For centering
 `define NEOGEO_HSYNC_OFFSET	8	// For centering
+
+// Defines to do with data packet sending
+`define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+4) // Need 4 cycles of control data first
+`define DATA_PREAMBLE	8
+`define DATA_GUARDBAND	2
+`define DATA_SIZE			32
+`define VIDEO_PREAMBLE	8
+`define VIDEO_GUARDBAND	2
+`define CTL_END			(`FULL_WIDTH-`VIDEO_PREAMBLE-`VIDEO_GUARDBAND)
+
+////////////////////////////////////////////////////////////////////////
+// Line doubler
+// Takes the 480i video data from the NeoGeo and doubles the line
+// frequency by storing a line in RAM and then displaying it twice.
+// Also takes care of centring the picture (using the sync input).
+////////////////////////////////////////////////////////////////////////
 
 reg [7:0] red, green, blue;
 reg [9:0] CounterX, CounterY;
@@ -129,6 +80,7 @@ begin
 	videoaddress=0;
 	videoaddressout=0;
 	videobusout=0;
+	scanlineType=0;
 	hSync=0;
 	vSync=0;
 	DrawArea=0;
@@ -199,130 +151,208 @@ begin
 end
 
 ////////////////////////////////////////////////////////////////////////
-// Everything else
+// Neo Geo audio input
 ////////////////////////////////////////////////////////////////////////
 
-always @(posedge audioClk)
+reg [15:0] audioInput [1:0];
+reg [15:0] curSampleL;
+reg [15:0] curSampleR;
+
+initial
 begin
-	if (!button) begin
-		if (buttonDebounce!=0)
-			scanlineType<=scanlineType!=4?scanlineType+1:0;
-		buttonDebounce<=0;
-	end else if (buttonDebounce!='hffff) begin	// Audio clock is 6MHz so this is about 11ms
-		buttonDebounce<=buttonDebounce+1;
-	end
+	audioInput[0]=0;
+	audioInput[1]=0;
+	curSampleL=0;
+	curSampleR=0;
 end
 
 always @(posedge audioClk) if (audioLR) audioInput[0]<=(audioInput[0]<<1)|audioData; else audioInput[1]<=(audioInput[1]<<1)|audioData;
 always @(negedge audioLR) begin curSampleL<=audioInput[0]; curSampleR<=audioInput[1]; end
 
-`define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+4)
-`define DATA_PREAMBLE	8
-`define DATA_GUARDBAND	2
-`define DATA_SIZE			32
-`define VIDEO_PREAMBLE	8
-`define VIDEO_GUARDBAND	2
-`define CTL_END			(`FULL_WIDTH-`VIDEO_PREAMBLE-`VIDEO_GUARDBAND)
+////////////////////////////////////////////////////////////////////////
+// HDMI audio packet generator
+////////////////////////////////////////////////////////////////////////
 
-function [7:0] ECCcode;
-	input [7:0] code;
-	input bita;
-	input mask;
+localparam [191:0] channelStatus = 192'hc203004004; // 32KHz 16-bit LPCM audio
+reg [23:0] audioPacketHeader;
+reg [55:0] audioSubPacket[3:0];
+reg [7:0] channelStatusIdx;
+reg [10:0] audioTimer;
+reg [9:0] audioSamples;
+reg [1:0] samplesHead;
+reg sendRegenPacket;
+
+initial
+begin
+	audioPacketHeader=0;
+	audioSubPacket[0]=0;
+	audioSubPacket[1]=0;
+	audioSubPacket[2]=0;
+	audioSubPacket[3]=0;
+	channelStatusIdx=0;
+	audioTimer=0;
+	audioSamples=0;
+	samplesHead=0;
+	sendRegenPacket=0;
+end
+
+task AudioPacketGeneration;
 	begin
-		ECCcode = (code<<1) ^ (((code[7]^bita) && mask)?(1+(1<<6)+(1<<7)):0);
+		// Buffer up an audio sample every 750 pixel clocks (32KHz output from 24MHz pixel clock)
+		// Don't add to the audio output if we're currently sending that packet though
+		if (audioTimer>=749 && !(
+			CounterX>=(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE) &&
+			CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE)
+		)) begin
+			audioTimer<=audioTimer-749;
+			audioPacketHeader<=audioPacketHeader|24'h000002|((channelStatusIdx==0?24'h100100:24'h000100)<<samplesHead);
+			audioSubPacket[samplesHead]<=((curSampleL<<8)|(curSampleR<<32)
+								|((^curSampleL)?56'h08000000000000:56'h0)		// parity bit for left channel
+								|((^curSampleR)?56'h80000000000000:56'h0))	// parity bit for right channel
+								^(channelStatus[channelStatusIdx]?56'hCC000000000000:56'h0); // And channel status bit and adjust parity
+			if (channelStatusIdx<191)
+				channelStatusIdx<=channelStatusIdx+1;
+			else
+				channelStatusIdx<=0;
+			samplesHead<=samplesHead+1;
+			audioSamples<=audioSamples+1;
+			if (audioSamples[4:0]==0)
+				sendRegenPacket<=1;
+		end else begin
+			audioTimer<=audioTimer+1;
+		end
 	end
-endfunction
+endtask
 
-function ECC;
+////////////////////////////////////////////////////////////////////////
+// Error correction code generator
+// Generates error correction codes needed for verifying HDMI packets
+////////////////////////////////////////////////////////////////////////
+
+function [7:0] ECCcode;	// Cycles the error code generator
 	input [7:0] code;
 	input bita;
-	input mask;
+	input passthroughData;
 	begin
-		ECC = mask?bita:code[7];
+		ECCcode = (code<<1) ^ (((code[7]^bita) && passthroughData)?(1+(1<<6)+(1<<7)):0);
 	end
 endfunction
 
 task ECCu;
+	output outbit;
 	inout [7:0] code;
 	input bita;
-	input mask;
+	input passthroughData;
 	begin
-		code <= ECCcode(code, bita, mask);
+		outbit <= passthroughData?bita:code[7];
+		code <= ECCcode(code, bita, passthroughData);
 	end
 endtask
-
-function ECC2a;
-	input [7:0] code;
-	input bita;
-	input bitb;
-	input mask;
-	begin
-		ECC2a = mask?bita:code[7];
-	end
-endfunction
-
-function ECC2b;
-	input [7:0] code;
-	input bita;
-	input bitb;
-	input mask;
-	begin
-		ECC2b = mask?bitb:(code[6]^(((code[7]^bita) && mask)?1'b1:1'b0));
-	end
-endfunction
 
 task ECC2u;
+	output outbita;
+	output outbitb;
 	inout [7:0] code;
 	input bita;
 	input bitb;
-	input mask;
+	input passthroughData;
 	begin
-		code <= ECCcode(ECCcode(code, bita, mask), bitb, mask);
+		outbita <= passthroughData?bita:code[7];
+		outbitb <= passthroughData?bitb:(code[6]^(((code[7]^bita) && passthroughData)?1'b1:1'b0));
+		code <= ECCcode(ECCcode(code, bita, passthroughData), bitb, passthroughData);
 	end
 endtask
 
-localparam [191:0] CSB = 192'h00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_C2_03_00_40_04;
+////////////////////////////////////////////////////////////////////////
+// Packet sending
+// During hsync periods send audio data and infoframe data packets
+////////////////////////////////////////////////////////////////////////
+
+reg [3:0] dataChannel0;
+reg [3:0] dataChannel1;
+reg [3:0] dataChannel2;
+reg [23:0] packetHeader;
+reg [55:0] subpacket[3:0];
+reg [7:0] bchHdr;
+reg [7:0] bchCode [3:0];
+reg [4:0] dataOffset;
+reg [3:0] preamble;
+reg tercData;
+reg dataGuardBand;
+reg videoGuardBand;
+
+initial
+begin
+	dataChannel0=0;
+	dataChannel1=0;
+	dataChannel2=0;
+	packetHeader=0;
+	subpacket[0]=0;
+	subpacket[1]=0;
+	subpacket[2]=0;
+	subpacket[3]=0;
+	bchHdr=0;
+	bchCode[0]=0;
+	bchCode[1]=0;
+	bchCode[2]=0;
+	bchCode[3]=0;
+	dataOffset=0;
+	preamble=0;
+	tercData=0;
+	dataGuardBand=0;
+	videoGuardBand=0;
+end
+
+task SendPacket;
+	inout [32:0] pckHeader;
+	inout [55:0] pckData0;
+	inout [55:0] pckData1;
+	inout [55:0] pckData2;
+	inout [55:0] pckData3;
+	input firstPacket;
+begin
+	dataChannel0[0]=hSync;
+	dataChannel0[1]=vSync;
+	dataChannel0[3]=(!firstPacket || dataOffset)?1'b1:1'b0;
+	ECCu(dataChannel0[2], bchHdr, pckHeader[0], dataOffset<24?1'b1:1'b0);
+	ECC2u(dataChannel1[0], dataChannel2[0], bchCode[0], pckData0[0], pckData0[1], dataOffset<28?1'b1:1'b0);
+	ECC2u(dataChannel1[1], dataChannel2[1], bchCode[1], pckData1[0], pckData1[1], dataOffset<28?1'b1:1'b0);
+	ECC2u(dataChannel1[2], dataChannel2[2], bchCode[2], pckData2[0], pckData2[1], dataOffset<28?1'b1:1'b0);
+	ECC2u(dataChannel1[3], dataChannel2[3], bchCode[3], pckData3[0], pckData3[1], dataOffset<28?1'b1:1'b0);
+	pckHeader<=pckHeader[23:1];
+	pckData0<=pckData0[55:2];
+	pckData1<=pckData1[55:2];
+	pckData2<=pckData2[55:2];
+	pckData3<=pckData3[55:2];
+	dataOffset<=dataOffset+5'b1;
+end
+endtask
 
 always @(posedge pixclk)
 begin
-	if (audioTimer>=749 && !(
-		CounterX>=(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE) &&
-		CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE)
-		)) begin
-		
-		audioTimer<=audioTimer-749;
-		packetHeader2<=packetHeader2|24'h000002|((channelStatusIdx==0?24'h100100:24'h000100)<<samplesHead);
-		subpacket2[samplesHead]<=((curSampleL<<8)|(curSampleR<<32)
-							|((^curSampleL)?56'h08000000000000:56'h0)
-							|((^curSampleR)?56'h80000000000000:56'h0))
-							^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-		if (channelStatusIdx<191)
-			channelStatusIdx<=channelStatusIdx+1;
-		else
-			channelStatusIdx<=0;
-		samplesHead<=samplesHead+1;
-		audioSamples<=audioSamples+1;
-		if (audioSamples[4:0]==0)
-			sendRegenPacket<=1;
-	end else begin
-		audioTimer<=audioTimer+1;
-	end
-
+	AudioPacketGeneration();
+	// Start sending audio data if we're in the right part of the hsync period
 	if (CounterX>=`DATA_START)
 	begin
 		if (CounterX<(`DATA_START+`DATA_PREAMBLE))
 		begin
+			// Send the data period preamble
+			// A nice "feature" of my test monitor (GL2450) is if you comment out
+			// this line you see your data next to your image which is useful for
+			// debugging
 			preamble<='b0101;
 		end
 		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND))
 		begin
+			// Start sending leading data guard band
 			tercData<=1;
 			dataGuardBand<=1;
 			dataChannel0<={1'b1, 1'b1, vSync, hSync};
 			preamble<=0;
+			// Set up the first of the packets we'll send
 			if (sendRegenPacket) begin
 				packetHeader<=24'h000001;	// audio clock regeneration packet (N=0x1000 CTS=0x6270)
-				subpacket[0]<=56'h001000c05d0000;	// N=0x1000 CTS=0x5dc0
+				subpacket[0]<=56'h001000c05d0000;	// N=0x1000 CTS=0x5dc0 (24MHz pixel clock -> 32KHz audio clock)
 				subpacket[1]<=56'h001000c05d0000;
 				subpacket[2]<=56'h001000c05d0000;
 				subpacket[3]<=56'h001000c05d0000;
@@ -333,92 +363,41 @@ begin
 					packetHeader<=24'h0D0282;	// infoframe AVI packet
 					subpacket[0]<=56'h0000010019107b;
 					subpacket[1]<=56'h0501000005bf00;
-					subpacket[2]<=56'h00000000000000;
-					subpacket[3]<=56'h00000000000000;
 				end else begin
 					packetHeader<=24'h0A0184;	// infoframe audio packet
 					subpacket[0]<=56'h0000000000115f;
 					subpacket[1]<=56'h00000000000000;
-					subpacket[2]<=56'h00000000000000;
-					subpacket[3]<=56'h00000000000000;
 				end
+				subpacket[2]<=56'h00000000000000;
+				subpacket[3]<=56'h00000000000000;
 			end
-			
-			bchHdr<=0;
-			bchCode[0]<=0;
-			bchCode[1]<=0;
-			bchCode[2]<=0;
-			bchCode[3]<=0;
-			dataOffset<=0;
-			dataOffset2<=0;
 		end
 		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE))
 		begin
 			dataGuardBand<=0;
-			dataChannel0<={dataOffset?1'b1:1'b0, ECC(bchHdr, packetHeader[0], dataOffset<24?1'b1:1'b0), vSync, hSync};
-			dataChannel1<={
-				ECC2a(bchCode[3], subpacket[3][0], subpacket[3][1], (dataOffset<5'd28)?1'b1:1'b0),
-				ECC2a(bchCode[2], subpacket[2][0], subpacket[2][1], (dataOffset<5'd28)?1'b1:1'b0),
-				ECC2a(bchCode[1], subpacket[1][0], subpacket[1][1], (dataOffset<5'd28)?1'b1:1'b0),
-				ECC2a(bchCode[0], subpacket[0][0], subpacket[0][1], (dataOffset<5'd28)?1'b1:1'b0)
-				};
-			dataChannel2<={
-				ECC2b(bchCode[3], subpacket[3][0], subpacket[3][1], ((dataOffset<5'd28)?1'b1:1'b0)),
-				ECC2b(bchCode[2], subpacket[2][0], subpacket[2][1], ((dataOffset<5'd28)?1'b1:1'b0)),
-				ECC2b(bchCode[1], subpacket[1][0], subpacket[1][1], ((dataOffset<5'd28)?1'b1:1'b0)),
-				ECC2b(bchCode[0], subpacket[0][0], subpacket[0][1], ((dataOffset<5'd28)?1'b1:1'b0))
-				};
-			ECCu(bchHdr, packetHeader[0], dataOffset<24?1'b1:1'b0);
-			ECC2u(bchCode[3], subpacket[3][0], subpacket[3][1], dataOffset<28?1'b1:1'b0);
-			ECC2u(bchCode[2], subpacket[2][0], subpacket[2][1], dataOffset<28?1'b1:1'b0);
-			ECC2u(bchCode[1], subpacket[1][0], subpacket[1][1], dataOffset<28?1'b1:1'b0);
-			ECC2u(bchCode[0], subpacket[0][0], subpacket[0][1], dataOffset<28?1'b1:1'b0);
-			packetHeader<=packetHeader[23:1];
-			subpacket[0]<=subpacket[0][55:2];
-			subpacket[1]<=subpacket[1][55:2];
-			subpacket[2]<=subpacket[2][55:2];
-			subpacket[3]<=subpacket[3][55:2];
-			dataOffset<=dataOffset+5'b1;
+			// Send first data packet (Infoframe or audio clock regen)
+			SendPacket(packetHeader, subpacket[0], subpacket[1], subpacket[2], subpacket[3], 1);
 		end
 		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE))
 		begin
-			dataChannel0<={1'b1, ECC(bchHdr, packetHeader2[0], dataOffset2<24?1'b1:1'b0), vSync, hSync};
-			dataChannel1<={
-				ECC2a(bchCode[3], subpacket2[3][0], subpacket2[3][1], (dataOffset2<5'd28)?1'b1:1'b0),
-				ECC2a(bchCode[2], subpacket2[2][0], subpacket2[2][1], (dataOffset2<5'd28)?1'b1:1'b0),
-				ECC2a(bchCode[1], subpacket2[1][0], subpacket2[1][1], (dataOffset2<5'd28)?1'b1:1'b0),
-				ECC2a(bchCode[0], subpacket2[0][0], subpacket2[0][1], (dataOffset2<5'd28)?1'b1:1'b0)
-				};
-			dataChannel2<={
-				ECC2b(bchCode[3], subpacket2[3][0], subpacket2[3][1], ((dataOffset2<5'd28)?1'b1:1'b0)),
-				ECC2b(bchCode[2], subpacket2[2][0], subpacket2[2][1], ((dataOffset2<5'd28)?1'b1:1'b0)),
-				ECC2b(bchCode[1], subpacket2[1][0], subpacket2[1][1], ((dataOffset2<5'd28)?1'b1:1'b0)),
-				ECC2b(bchCode[0], subpacket2[0][0], subpacket2[0][1], ((dataOffset2<5'd28)?1'b1:1'b0))
-				};
-			ECCu(bchHdr, packetHeader2[0], dataOffset2<24?1'b1:1'b0);
-			ECC2u(bchCode[3], subpacket2[3][0], subpacket2[3][1], dataOffset2<28?1'b1:1'b0);
-			ECC2u(bchCode[2], subpacket2[2][0], subpacket2[2][1], dataOffset2<28?1'b1:1'b0);
-			ECC2u(bchCode[1], subpacket2[1][0], subpacket2[1][1], dataOffset2<28?1'b1:1'b0);
-			ECC2u(bchCode[0], subpacket2[0][0], subpacket2[0][1], dataOffset2<28?1'b1:1'b0);
-			packetHeader2<=packetHeader2[23:1];
-			subpacket2[0]<=subpacket2[0][55:2];
-			subpacket2[1]<=subpacket2[1][55:2];
-			subpacket2[2]<=subpacket2[2][55:2];
-			subpacket2[3]<=subpacket2[3][55:2];
-			dataOffset2<=dataOffset2+1;
+			// Send second data packet (audio data)
+			SendPacket(audioPacketHeader, audioSubPacket[0], audioSubPacket[1], audioSubPacket[2], audioSubPacket[3], 0);
 		end
 		else if (CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE+`DATA_GUARDBAND))
 		begin
+			// Trailing guardband for data period
 			dataGuardBand<=1;
 			dataChannel0<={1'b1, 1'b1, vSync, hSync};	
 		end
 		else
 		begin
+			// Back to normal DVI style control data
 			tercData<=0;
 			dataGuardBand<=0;
 		end
 	end
-	
+	// After we've sent data packets we need to do the video preamble and
+	// guardband just before sending active video data
 	if (CounterX>=(`CTL_END+`VIDEO_PREAMBLE))
 	begin
 		preamble<=0;
@@ -503,6 +482,29 @@ assign TMDSp[0]=clk_TMDS?TMDS_shift_blue[0]:TMDS_shift_blue[1];
 assign TMDSn[0]=!TMDSp[0];
 assign TMDSp_clock=pixclk;
 assign TMDSn_clock=!pixclk;
+
+////////////////////////////////////////////////////////////////////////
+// Scanline method selection button debouncer
+////////////////////////////////////////////////////////////////////////
+
+reg [15:0] buttonDebounce;
+
+initial
+begin
+	buttonDebounce=0;
+end
+
+always @(posedge audioClk)
+begin
+	if (!button) begin
+		if (buttonDebounce!=0)
+			scanlineType<=scanlineType!=4?scanlineType+1:0;
+		buttonDebounce<=0;
+	end else if (buttonDebounce!='hffff) begin	// Audio clock is 6MHz so this is about 11ms
+		buttonDebounce<=buttonDebounce+1;
+	end
+end
+
 endmodule
 
 ////////////////////////////////////////////////////////////////////////
