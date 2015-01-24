@@ -2,7 +2,7 @@
 
 ////////////////////////////////////////////////////////////////////////
 module HDMIDirectV(
-	input pixclk, clk_TMDS,  // 25MHz + 125MHz
+	input pixclk, clk_TMDS,  // 24MHz + 120MHz
 	input [16:0] videobus,
 	input [4:0] Rin, Gin, Bin,
 	input dak, sha,
@@ -23,12 +23,7 @@ module HDMIDirectV(
 );
 
 ////////////////////////////////////////////////////////////////////////
-reg [9:0] CounterX, CounterY;
-reg hSync, vSync, DrawArea;
-reg [10:0] videoaddress;
-reg [10:0] videoaddressout;
-reg [16:0] videobusout;
-reg frame;
+
 reg tercData;
 reg [3:0] dataChannel0;
 reg [3:0] dataChannel1;
@@ -46,27 +41,17 @@ reg [4:0]  dataOffset;
 reg [4:0]  dataOffset2;
 reg [191:0] channelStatus;
 reg [7:0] channelStatusIdx;
-reg tercDataDelayed;
-reg videoGuardBandDelayed;
-reg dataGuardBandDelayed;
-reg [4:0] samplesNeeded;
-reg [15:0] audioTimer;
+reg [10:0] audioTimer;
 reg [9:0] audioSamples;
-reg [15:0] sampleL;
-reg [15:0] sampleR;
+reg [1:0] samplesHead;
 reg [15:0] audioInput [1:0];
+reg [15:0] curSampleL;
+reg [15:0] curSampleR;
+reg sendRegenPacket;
+reg [15:0] buttonDebounce;
 
 initial
 begin
- CounterX=0;
- CounterY=0;
- hSync=0;
- vSync=0;
- DrawArea=0;
- videobusout=0;
- videoaddressout=0;
- videoaddressout=0;
- frame=0;
  tercData=0;
  dataChannel0=0;
  dataChannel1=0;
@@ -96,22 +81,59 @@ begin
  tercDataDelayed=0;
  videoGuardBandDelayed=0;
  dataGuardBandDelayed=0;
- samplesNeeded=0;
  audioTimer=0;
- sampleL=0;
- sampleR=0;
+ samplesHead=0;
  audioInput[0]=0;
  audioInput[1]=0;
+ curSampleL=0;
+ curSampleR=0;
+ sendRegenPacket=0;
+ scanlineType=0;
+ buttonDebounce=0;
 end
 
-`define DISPLAY_WIDTH 640 //720 //640
-`define DISPLAY_HEIGHT 480
-`define FULL_WIDTH 768 // 880 //800
-`define FULL_HEIGHT 528
-`define H_FRONT_PORCH 16 //24 // 16 
-`define H_SYNC 96 // 40 //96 
-`define V_FRONT_PORCH 10 
-`define V_SYNC 2 // 3 //2
+////////////////////////////////////////////////////////////////////////
+// Line doubler
+// Takes the 480i video data from the NeoGeo and doubles the line
+// frequency by storing a line in RAM and then displaying it twice.
+// Also takes care of centring the picture (using the sync input).
+////////////////////////////////////////////////////////////////////////
+
+`define DISPLAY_WIDTH			640
+`define DISPLAY_HEIGHT			480
+`define FULL_WIDTH				768 // Should be 800 for 640x480p
+`define FULL_HEIGHT				528 // Should be 525 for 640x480p
+`define H_FRONT_PORCH			16
+`define H_SYNC						96 
+`define V_FRONT_PORCH			10 
+`define V_SYNC 					2
+`define NEOGEO_VSYNC_LENGTH	80
+`define NEOGEO_VSYNC_OFFSET	12	// For centering
+`define NEOGEO_HSYNC_OFFSET	8	// For centering
+
+reg [7:0] red, green, blue;
+reg [9:0] CounterX, CounterY;
+reg [10:0] videoaddress;
+reg [10:0] videoaddressout;
+reg [16:0] videobusout;
+reg [2:0] scanlineType;
+reg hSync, vSync, DrawArea, frame;
+
+initial
+begin
+	red=0;
+	green=0;
+	blue=0;
+	CounterX=0;
+	CounterY=0;
+	videoaddress=0;
+	videoaddressout=0;
+	videobusout=0;
+	hSync=0;
+	vSync=0;
+	DrawArea=0;
+	frame=0;
+end
 
 assign videoramenable=1'b1;
 assign videoramclk=!pixclk;
@@ -122,15 +144,77 @@ assign videobusoutw=videobusout;
 assign videoaddressw=videoaddress;
 
 always @(posedge pixclk) DrawArea <= (CounterX<`DISPLAY_WIDTH) && (CounterY<`DISPLAY_HEIGHT);
-
-//always @(posedge pixclk) CounterX <= (CounterX==(`FULL_WIDTH-1)) ? 0 : CounterX+1;
-//always @(posedge pixclk) if(CounterX==(`FULL_WIDTH-1)) CounterY <= (CounterY==(`FULL_HEIGHT-1)) ? 0 : CounterY+1;
-
 always @(posedge pixclk) hSync <= (CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC));
 always @(posedge pixclk) vSync <= (CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH)) && (CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC));
 
+always @(posedge pixclk)
+begin
+	CounterX <= (CounterX==(`FULL_WIDTH-1)) ? 0 : CounterX+1;
+	if(CounterX==(`FULL_WIDTH-1)) begin
+		if (CounterY==(`FULL_HEIGHT-1)) begin
+			CounterY <= 0;
+			if (scanlineType[0])
+				frame <= !frame;
+		end else begin
+			CounterY <= CounterY+1;
+		end
+	end
+	if (sync) begin
+		if ((CounterY <= `NEOGEO_VSYNC_OFFSET || CounterY > `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET))
+			CounterY <= `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET+1;
+		if (
+			(CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)<`FULL_WIDTH-`NEOGEO_HSYNC_OFFSET &&
+			(CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)>=`DISPLAY_WIDTH-`NEOGEO_HSYNC_OFFSET)
+			CounterX <= (2*(`DISPLAY_WIDTH-`NEOGEO_HSYNC_OFFSET)-`FULL_WIDTH);
+	end
+	
+	if ((CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)<`DISPLAY_WIDTH) begin
+		if (CounterX[0]) begin
+			videoaddressout<=(CounterY[1]?`DISPLAY_WIDTH:0)+(CounterY[0]?`FULL_WIDTH/2:0)+(CounterX>>1);
+			videobusout[4:0]<=Rin;
+			videobusout[9:5]<=Gin;
+			videobusout[14:10]<=Bin;
+			videobusout[15]<=!dak;
+			videobusout[16]<=!sha;
+		end
+	end
+	if (CounterX<`DISPLAY_WIDTH) begin
+		videoaddress<=(CounterY[1]?0:`DISPLAY_WIDTH) + CounterX;
+		if (CounterY[0]==frame || scanlineType==4) begin
+			red <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
+			green <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
+			blue <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
+		end else begin
+			if (!scanlineType[1]) begin
+				red <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
+				green <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
+				blue <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
+			end else begin
+				red <= 0;
+				green <= 0;
+				blue <= 0;
+			end
+		end
+	end
+end
+
+////////////////////////////////////////////////////////////////////////
+// Everything else
+////////////////////////////////////////////////////////////////////////
+
+always @(posedge audioClk)
+begin
+	if (!button) begin
+		if (buttonDebounce!=0)
+			scanlineType<=scanlineType!=4?scanlineType+1:0;
+		buttonDebounce<=0;
+	end else if (buttonDebounce!='hffff) begin	// Audio clock is 6MHz so this is about 11ms
+		buttonDebounce<=buttonDebounce+1;
+	end
+end
+
 always @(posedge audioClk) if (audioLR) audioInput[0]<=(audioInput[0]<<1)|audioData; else audioInput[1]<=(audioInput[1]<<1)|audioData;
-always @(negedge audioLR) begin sampleL<=audioInput[0]; sampleR<=audioInput[1]; end
+always @(negedge audioLR) begin curSampleL<=audioInput[0]; curSampleR<=audioInput[1]; end
 
 `define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+4)
 `define DATA_PREAMBLE	8
@@ -201,9 +285,25 @@ localparam [191:0] CSB = 192'h00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00
 
 always @(posedge pixclk)
 begin
-	if (audioTimer==749) begin
-		audioTimer<=0;
-		samplesNeeded<=samplesNeeded+1;
+	if (audioTimer>=749 && !(
+		CounterX>=(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE) &&
+		CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE)
+		)) begin
+		
+		audioTimer<=audioTimer-749;
+		packetHeader2<=packetHeader2|24'h000002|((channelStatusIdx==0?24'h100100:24'h000100)<<samplesHead);
+		subpacket2[samplesHead]<=((curSampleL<<8)|(curSampleR<<32)
+							|((^curSampleL)?56'h08000000000000:56'h0)
+							|((^curSampleR)?56'h80000000000000:56'h0))
+							^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
+		if (channelStatusIdx<191)
+			channelStatusIdx<=channelStatusIdx+1;
+		else
+			channelStatusIdx<=0;
+		samplesHead<=samplesHead+1;
+		audioSamples<=audioSamples+1;
+		if (audioSamples[4:0]==0)
+			sendRegenPacket<=1;
 	end else begin
 		audioTimer<=audioTimer+1;
 	end
@@ -220,12 +320,14 @@ begin
 			dataGuardBand<=1;
 			dataChannel0<={1'b1, 1'b1, vSync, hSync};
 			preamble<=0;
-			if (audioSamples[4:0]==0) begin
+			if (sendRegenPacket) begin
 				packetHeader<=24'h000001;	// audio clock regeneration packet (N=0x1000 CTS=0x6270)
 				subpacket[0]<=56'h001000c05d0000;	// N=0x1000 CTS=0x5dc0
 				subpacket[1]<=56'h001000c05d0000;
 				subpacket[2]<=56'h001000c05d0000;
 				subpacket[3]<=56'h001000c05d0000;
+				if (CounterX==(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND-1))
+					sendRegenPacket<=0;
 			end else begin
 				if (!CounterY[0]) begin
 					packetHeader<=24'h0D0282;	// infoframe AVI packet
@@ -239,33 +341,6 @@ begin
 					subpacket[1]<=56'h00000000000000;
 					subpacket[2]<=56'h00000000000000;
 					subpacket[3]<=56'h00000000000000;
-				end
-			end
-			
-			if (packetHeader2==0 || audioSamples[4:0]!=0) begin
-				if (samplesNeeded>0) begin
-					if (packetHeader2==0) begin
-						packetHeader2<=24'h000102|(channelStatusIdx==0?24'h100000:24'h0);	// audio sample
-						subpacket2[0]<=((sampleL<<8)|(sampleR<<32)
-							|((^sampleL)?56'h08000000000000:56'h0)
-							|((^sampleR)?56'h80000000000000:56'h0))
-							^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-						subpacket2[1]<=56'h99000000000000;
-						subpacket2[2]<=56'h99000000000000;
-						subpacket2[3]<=56'h99000000000000;
-					end else begin
-						packetHeader2<=packetHeader2|24'h000200|(channelStatusIdx==0?24'h200000:24'h0);
-						subpacket2[1]<=((sampleL<<8)|(sampleR<<32)
-							|((^sampleL)?56'h08000000000000:56'h0)
-							|((^sampleR)?56'h80000000000000:56'h0))
-							^(CSB[channelStatusIdx]?56'hCC000000000000:56'h0);
-					end
-					if (channelStatusIdx<191)
-						channelStatusIdx<=channelStatusIdx+1;
-					else
-						channelStatusIdx<=0;
-					samplesNeeded<=samplesNeeded-1+((audioTimer==749)?1:0);
-					audioSamples<=audioSamples+1;
 				end
 			end
 			
@@ -359,58 +434,29 @@ begin
 	end
 end
 
-////////////////
-//wire [7:0] W = {8{CounterX[7:0]==CounterY[7:0]}};
-//wire [7:0] A = {8{CounterX[7:5]==3'h2 && CounterY[7:5]==3'h2}};
-//wire ndak = !dak;
+////////////////////////////////////////////////////////////////////////
+// HDMI encoder
+// Encodes video data (TMDS) or packet data (TERC4) ready for sending
+////////////////////////////////////////////////////////////////////////
 
-reg [7:0] red, green, blue;
-//always @(posedge pixclk) red <=   CounterY[0]?(((Rin<<1)|ndak)*3+((~sha)?((Rin<<1)|ndak):0)):0;//videobus[23:16];//({CounterX[5:0] & {6{CounterY[4:3]==~CounterX[4:3]}}, 2'b00} | W) & ~A;
-//always @(posedge pixclk) green <= CounterY[0]?(((Gin<<1)|ndak)*3+((~sha)?((Gin<<1)|ndak):0)):0;//videobus[15:8];//(CounterX[7:0] & {8{CounterY[6]}} | W) & ~A;
-//always @(posedge pixclk) blue <=  CounterY[0]?(((Bin<<1)|ndak)*3+((~sha)?((Bin<<1)|ndak):0)):0;//videobus[7:0];//CounterY[7:0] | W | A;
+reg tercDataDelayed;
+reg videoGuardBandDelayed;
+reg dataGuardBandDelayed;
+
+initial
+begin
+	tercDataDelayed=0;
+	videoGuardBandDelayed=0;
+	dataGuardBandDelayed=0;
+end
 
 always @(posedge pixclk)
 begin
-	CounterX <= (CounterX==(`FULL_WIDTH-1)) ? 0 : CounterX+1;
-	if(CounterX==(`FULL_WIDTH-1)) begin
-		if (CounterY==(`FULL_HEIGHT-1)) begin
-			CounterY <= 0;
-			frame <= !frame;
-		end else begin
-			CounterY <= CounterY+1;
-		end
-	end
-	if (CounterY>`DISPLAY_HEIGHT && sync) begin
-		CounterY <= 0;
-	end
-	if ((CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)<`DISPLAY_WIDTH) begin
-		if (CounterX[0]) begin
-			videoaddressout<=(CounterY[1]?`DISPLAY_WIDTH:0)+(CounterY[0]?`FULL_WIDTH/2:0)+(CounterX>>1);
-			videobusout[4:0]<=Rin;
-			videobusout[9:5]<=Gin;
-			videobusout[14:10]<=Bin;
-			videobusout[15]<=!dak;
-			videobusout[16]<=!sha;
-		end
-	end else begin
-		if (sync)
-			CounterX <= 0;
-	end
-	if (CounterX<`DISPLAY_WIDTH) begin
-		videoaddress<=(CounterY[1]?0:`DISPLAY_WIDTH) + CounterX;
-		if (CounterY[0]==frame) begin
-			red <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
-			green <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
-			blue <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
-		end else begin
-			red <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
-			green <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
-			blue <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
-		end
-	end
+	tercDataDelayed<=tercData;	// To account for delay through encoder
+	videoGuardBandDelayed<=videoGuardBand;
+	dataGuardBandDelayed<=dataGuardBand;
 end
 
-////////////////////////////////////////////////////////////////////////
 wire [9:0] TMDS_red, TMDS_green, TMDS_blue;
 TMDS_encoder encode_R(.clk(pixclk), .VD(red  ), .CD(preamble[3:2]), .VDE(DrawArea), .TMDS(TMDS_red));
 TMDS_encoder encode_G(.clk(pixclk), .VD(green), .CD(preamble[1:0]), .VDE(DrawArea), .TMDS(TMDS_green));
@@ -421,21 +467,17 @@ TERC4_encoder encode_R4(.clk(pixclk), .data(dataChannel2), .TERC(TERC4_red));
 TERC4_encoder encode_G4(.clk(pixclk), .data(dataChannel1), .TERC(TERC4_green));
 TERC4_encoder encode_B4(.clk(pixclk), .data(dataChannel0), .TERC(TERC4_blue));
 
-always @(posedge pixclk)
-begin
-	tercDataDelayed<=tercData;	// To account for delay through encoder
-	videoGuardBandDelayed<=videoGuardBand;
-	dataGuardBandDelayed<=dataGuardBand;
-end
-
 wire [9:0] redSource = videoGuardBandDelayed ? 10'b1011001100 : (dataGuardBandDelayed ? 10'b0100110011 : (tercDataDelayed ? TERC4_red : TMDS_red));
 wire [9:0] greenSource = (dataGuardBandDelayed || videoGuardBandDelayed) ? 10'b0100110011 : (tercDataDelayed ? TERC4_green : TMDS_green);
 wire [9:0] blueSource = videoGuardBandDelayed ? 10'b1011001100 : (tercDataDelayed ? TERC4_blue : TMDS_blue);
 
 ////////////////////////////////////////////////////////////////////////
+// HDMI data serialiser
+// Outputs the encoded video data as serial data across the HDMI bus
+////////////////////////////////////////////////////////////////////////
+
 reg [3:0] TMDS_mod10;  // modulus 10 counter
 reg [9:0] TMDS_shift_red, TMDS_shift_green, TMDS_shift_blue;
-//reg TMDS_shift_load;
 
 initial
 begin
@@ -443,9 +485,6 @@ begin
   TMDS_shift_red=0;
   TMDS_shift_green=0;
   TMDS_shift_blue=0;
-  red=0;
-  green=0;
-  blue=0;
 end
 
 always @(posedge clk_TMDS)
@@ -466,8 +505,11 @@ assign TMDSp_clock=pixclk;
 assign TMDSn_clock=!pixclk;
 endmodule
 
-
 ////////////////////////////////////////////////////////////////////////
+// TMDS encoder
+// Used to encode HDMI/DVI video data
+////////////////////////////////////////////////////////////////////////
+
 module TMDS_encoder(
 	input clk,
 	input [7:0] VD,  // video data (red, green or blue)
@@ -498,6 +540,9 @@ always @(posedge clk) TMDS <= VDE ? TMDS_data : TMDS_code;
 always @(posedge clk) balance_acc <= VDE ? balance_acc_new : 4'h0;
 endmodule
 
+////////////////////////////////////////////////////////////////////////
+// TERC4 Encoder
+// Used to encode the HDMI data packets such as audio
 ////////////////////////////////////////////////////////////////////////
 
 module TERC4_encoder(
