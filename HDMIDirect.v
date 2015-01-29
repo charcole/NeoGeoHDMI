@@ -24,12 +24,12 @@ module HDMIDirectV(
 	input audioData,
 	output [2:0] TMDSp, TMDSn,
 	output TMDSp_clock, TMDSn_clock,
-	output [10:0] videoaddressw,
+	output [11:0] videoaddressw,
 	output videoramenable,
 	output videoramclk,
 	output videoramoutclk,
 	output videowrite,
-	output [10:0] videoaddressoutw,
+	output [11:0] videoaddressoutw,
 	output [16:0] videobusoutw,
 	output neogeoclk
 );
@@ -45,12 +45,18 @@ module HDMIDirectV(
 `define H_SYNC						62 
 `define V_FRONT_PORCH			9 
 `define V_SYNC 					6
+
+`define NEOGEO_DISPLAY_WIDTH	640
+`define NEOGEO_DISPLAY_HEIGHT	448
+`define NEOGEO_FULL_WIDTH		768
+`define NEOGEO_FULL_HEIGHT		528
 `define NEOGEO_VSYNC_LENGTH	80
-`define NEOGEO_VSYNC_OFFSET	12	// For centering
-`define NEOGEO_HSYNC_OFFSET	8	// For centering
+
+`define CENTERING_X				((`DISPLAY_WIDTH-`NEOGEO_DISPLAY_WIDTH)/2)	// For centering NeoGeo's 4:3 screen
+`define CENTERING_Y				((`DISPLAY_HEIGHT-`NEOGEO_DISPLAY_HEIGHT)/2)	// Should be multiple of 8
 
 // Defines to do with data packet sending
-`define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+4) // Need 4 cycles of control data first
+`define DATA_START		(`DISPLAY_WIDTH+4) // Need 4 cycles of control data first
 `define DATA_PREAMBLE	8
 `define DATA_GUARDBAND	2
 `define DATA_SIZE			32
@@ -101,8 +107,9 @@ assign neogeoclk=neoGeoClk;
 
 reg [7:0] red, green, blue;
 reg [9:0] CounterX, CounterY;
-reg [10:0] videoaddress;
-reg [10:0] videoaddressout;
+reg [9:0] NeoCounterX, NeoCounterY;
+reg [11:0] videoaddress;
+reg [11:0] videoaddressout;
 reg [16:0] videobusout;
 reg [2:0] scanlineType;
 reg hSync, vSync, DrawArea, frame;
@@ -122,11 +129,14 @@ begin
 	vSync=0;
 	DrawArea=0;
 	frame=0;
+	
+	NeoCounterX=0;
+	NeoCounterY=0;
 end
 
 assign videoramenable=1'b1;
-assign videoramclk=!pixclk;
-assign videoramoutclk=!pixclk;
+assign videoramclk=!clk_TMDS;
+assign videoramoutclk=!clk_TMDS;
 assign videowrite=1'b1;
 assign videoaddressoutw=videoaddressout;
 assign videobusoutw=videobusout;
@@ -136,29 +146,25 @@ always @(posedge pixclk) DrawArea <= (CounterX<`DISPLAY_WIDTH) && (CounterY<`DIS
 always @(posedge pixclk) hSync <= (CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC));
 always @(posedge pixclk) vSync <= (CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH)) && (CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC));
 
-always @(posedge pixclk)
+always @(negedge neogeoclk)
 begin
-	CounterX <= (CounterX==(`FULL_WIDTH-1)) ? 0 : CounterX+1;
-	if(CounterX==(`FULL_WIDTH-1)) begin
-		if (CounterY==(`FULL_HEIGHT-1)) begin
-			CounterY <= 0;
-			if (scanlineType[0])
-				frame <= !frame;
+	NeoCounterX <= (NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) ? 0 : NeoCounterX+1;
+	if(NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) begin
+		if (NeoCounterY==(`NEOGEO_FULL_HEIGHT-1)) begin
+			NeoCounterY <= 0;
 		end else begin
-			CounterY <= CounterY+1;
+			NeoCounterY <= NeoCounterY+1;
 		end
 	end
-	if (0 && sync) begin
-		if ((CounterY <= `NEOGEO_VSYNC_OFFSET || CounterY > `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET))
-			CounterY <= `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET+1;
-		if (
-			(CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)<`FULL_WIDTH-`NEOGEO_HSYNC_OFFSET &&
-			(CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)>=`DISPLAY_WIDTH-`NEOGEO_HSYNC_OFFSET)
-			CounterX <= (2*(`DISPLAY_WIDTH-`NEOGEO_HSYNC_OFFSET)-`FULL_WIDTH);
+	if (sync) begin
+		if (NeoCounterY > `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH)
+			NeoCounterY <= `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+1;
+		if ((NeoCounterX>>1)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)>=`NEOGEO_DISPLAY_WIDTH)
+			NeoCounterX <= 2*`NEOGEO_DISPLAY_WIDTH-`NEOGEO_FULL_WIDTH;
 	end
-	if ((CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)<`DISPLAY_WIDTH) begin
-		if (CounterX[0]) begin
-			videoaddressout<=(CounterY[1]?`DISPLAY_WIDTH:0)+(CounterY[0]?`FULL_WIDTH/2:0)+(CounterX>>1);
+	if ((NeoCounterX>>1)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)<`NEOGEO_DISPLAY_WIDTH) begin
+		if (NeoCounterX[0]) begin
+			videoaddressout<=(NeoCounterY[2:1]*`NEOGEO_DISPLAY_WIDTH)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)+(NeoCounterX>>1);
 			videobusout[4:0]<=Rin;
 			videobusout[9:5]<=Gin;
 			videobusout[14:10]<=Bin;
@@ -166,22 +172,49 @@ begin
 			videobusout[16]<=!sha;
 		end
 	end
-	if (CounterX<`DISPLAY_WIDTH) begin
-		videoaddress<=(CounterY[1]?0:`DISPLAY_WIDTH) + CounterX;
-		if (CounterY[0]==frame || scanlineType==4) begin
-			red <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
-			green <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
-			blue <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
-		end else begin
-			if (!scanlineType[1]) begin
-				red <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
-				green <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
-				blue <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
-			end else begin
-				red <= 0;
-				green <= 0;
-				blue <= 0;
+end
+	
+always @(posedge pixclk)
+begin
+	if(CounterX==(`FULL_WIDTH-1)) begin
+		if (CounterY==(`FULL_HEIGHT-1)) begin
+			// Sync screen output with NeoGeo output
+			// +2 means there's a line in the doubler ready
+			if (NeoCounterY==(`NEOGEO_FULL_HEIGHT-`CENTERING_Y+2) && NeoCounterX==0) begin
+				CounterY <= 0;
+				CounterX <= 0;
+				if (scanlineType[0])
+					frame <= !frame;
 			end
+		end else begin
+			CounterY <= CounterY+1;
+			CounterX <= 0;
+		end
+	end else begin
+		CounterX<=CounterX+1;
+	end
+	if (CounterX>=`CENTERING_X && CounterX<`DISPLAY_WIDTH+`CENTERING_X) begin
+		if ((CounterX-`CENTERING_X)<`NEOGEO_DISPLAY_WIDTH) begin
+			videoaddress<=(CounterY[2:1]*`NEOGEO_DISPLAY_WIDTH) + (CounterX-`CENTERING_X);
+			if (CounterY[0]==frame || scanlineType==4) begin
+				red <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
+				green <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
+				blue <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
+			end else begin
+				if (!scanlineType[1]) begin
+					red <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
+					green <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
+					blue <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
+				end else begin
+					red <= 0;
+					green <= 0;
+					blue <= 0;
+				end
+			end
+		end else begin
+			red <= 0;
+			green <= 0;
+			blue <= 0;			
 		end
 	end
 end
@@ -574,14 +607,14 @@ wire [3:0] Nb1s = VD[0] + VD[1] + VD[2] + VD[3] + VD[4] + VD[5] + VD[6] + VD[7];
 wire XNOR = (Nb1s>4'd4) || (Nb1s==4'd4 && VD[0]==1'b0);
 wire [8:0] q_m = {~XNOR, q_m[6:0] ^ VD[7:1] ^ {7{XNOR}}, VD[0]};
 
-reg [4:0] balance_acc;
+reg [3:0] balance_acc;
 
 initial begin
 	balance_acc=0;
 end
 
 wire [3:0] balance = q_m[0] + q_m[1] + q_m[2] + q_m[3] + q_m[4] + q_m[5] + q_m[6] + q_m[7] - 4'd4;
-wire balance_sign_eq = (balance[3] == balance_acc[4]);
+wire balance_sign_eq = (balance[3] == balance_acc[3]);
 wire invert_q_m = (balance==0 || balance_acc==0) ? ~q_m[8] : balance_sign_eq;
 wire [3:0] balance_acc_inc = balance - ({q_m[8] ^ ~balance_sign_eq} & ~(balance==0 || balance_acc==0));
 wire [3:0] balance_acc_new = invert_q_m ? balance_acc-balance_acc_inc : balance_acc+balance_acc_inc;
