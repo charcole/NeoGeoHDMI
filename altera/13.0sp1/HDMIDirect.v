@@ -11,7 +11,9 @@
 //		4: Line doubled
 
 module HDMIDirectV(
-	input pixclk, clk_TMDS,  // 24MHz + 120MHz
+	input pixclk,
+	input pixclk72,
+	input pixclk144,
 	input [16:0] videobus,
 	input [4:0] Rin, Gin, Bin,
 	input dak, sha,
@@ -22,38 +24,76 @@ module HDMIDirectV(
 	input audioData,
 	output [2:0] TMDSp, TMDSn,
 	output TMDSp_clock, TMDSn_clock,
-	output [10:0] videoaddressw,
+	output [11:0] videoaddressw,
 	output videoramenable,
 	output videoramclk,
 	output videoramoutclk,
 	output videowrite,
-	output [10:0] videoaddressoutw,
-	output [16:0] videobusoutw
+	output [11:0] videoaddressoutw,
+	output [16:0] videobusoutw,
+	output neogeoclk
 );
 
 ////////////////////////////////////////////////////////////////////////
 
 // Defines to do with video signal generation
-`define DISPLAY_WIDTH			640
+`define DISPLAY_WIDTH			720
 `define DISPLAY_HEIGHT			480
-`define FULL_WIDTH				768 // Should be 800 for 640x480p
-`define FULL_HEIGHT				528 // Should be 525 for 640x480p
+`define FULL_WIDTH				858
+`define FULL_HEIGHT				525
 `define H_FRONT_PORCH			16
-`define H_SYNC						96 
-`define V_FRONT_PORCH			10 
-`define V_SYNC 					2
+`define H_SYNC						62 
+`define V_FRONT_PORCH			9 
+`define V_SYNC 					6
+
+`define NEOGEO_DISPLAY_WIDTH	640
+`define NEOGEO_DISPLAY_HEIGHT	448
+`define NEOGEO_FULL_WIDTH		768
+`define NEOGEO_FULL_HEIGHT		528
 `define NEOGEO_VSYNC_LENGTH	80
-`define NEOGEO_VSYNC_OFFSET	12	// For centering
-`define NEOGEO_HSYNC_OFFSET	8	// For centering
+
+`define CENTERING_X				((`DISPLAY_WIDTH-`NEOGEO_DISPLAY_WIDTH)/2)	// For centering NeoGeo's 4:3 screen
+`define CENTERING_Y				((`DISPLAY_HEIGHT-`NEOGEO_DISPLAY_HEIGHT)/2)	// Should be multiple of 8
 
 // Defines to do with data packet sending
-`define DATA_START		(`DISPLAY_WIDTH+`H_FRONT_PORCH+4) // Need 4 cycles of control data first
+`define DATA_START		(`DISPLAY_WIDTH+4) // Need 4 cycles of control data first
 `define DATA_PREAMBLE	8
 `define DATA_GUARDBAND	2
 `define DATA_SIZE			32
 `define VIDEO_PREAMBLE	8
 `define VIDEO_GUARDBAND	2
 `define CTL_END			(`FULL_WIDTH-`VIDEO_PREAMBLE-`VIDEO_GUARDBAND)
+
+wire clk_TMDS = pixclk72;
+
+////////////////////////////////////////////////////////////////////////
+// Neo Geo Clk Gen
+////////////////////////////////////////////////////////////////////////
+
+`define NEOGEOCLK_LIMIT    (`FULL_WIDTH*`FULL_HEIGHT*5) // 5x as TMDS clock is 5x pixclk
+`define NEOGEOCLK_ADDITION (`NEOGEO_FULL_WIDTH*`NEOGEO_FULL_HEIGHT*2) // 2x as want 2 transitions
+
+reg [23:0] neoGeoClks;
+reg neoGeoClk;
+
+initial
+begin
+	neoGeoClks=0;
+	neoGeoClk=0;
+end
+
+always @(posedge clk_TMDS)
+begin
+	if (neoGeoClks>=`NEOGEOCLK_LIMIT)
+	begin
+		neoGeoClks<=neoGeoClks+`NEOGEOCLK_ADDITION-`NEOGEOCLK_LIMIT;
+		neoGeoClk<=!neoGeoClk;
+	end
+	else
+		neoGeoClks<=neoGeoClks+`NEOGEOCLK_ADDITION;
+end
+
+assign neogeoclk=neoGeoClk;
 
 ////////////////////////////////////////////////////////////////////////
 // Line doubler
@@ -64,8 +104,9 @@ module HDMIDirectV(
 
 reg [7:0] red, green, blue;
 reg [9:0] CounterX, CounterY;
-reg [10:0] videoaddress;
-reg [10:0] videoaddressout;
+reg [9:0] NeoCounterX, NeoCounterY;
+reg [11:0] videoaddress;
+reg [11:0] videoaddressout;
 reg [16:0] videobusout;
 reg [2:0] scanlineType;
 reg hSync, vSync, DrawArea, frame;
@@ -85,11 +126,14 @@ begin
 	vSync=0;
 	DrawArea=0;
 	frame=0;
+	
+	NeoCounterX=0;
+	NeoCounterY=0;
 end
 
 assign videoramenable=1'b1;
-assign videoramclk=!pixclk;
-assign videoramoutclk=!pixclk;
+assign videoramclk=!clk_TMDS;
+assign videoramoutclk=!clk_TMDS;
 assign videowrite=1'b1;
 assign videoaddressoutw=videoaddressout;
 assign videobusoutw=videobusout;
@@ -99,30 +143,25 @@ always @(posedge pixclk) DrawArea <= (CounterX<`DISPLAY_WIDTH) && (CounterY<`DIS
 always @(posedge pixclk) hSync <= (CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC));
 always @(posedge pixclk) vSync <= (CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH)) && (CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC));
 
-always @(posedge pixclk)
+always @(negedge neogeoclk)
 begin
-	CounterX <= (CounterX==(`FULL_WIDTH-1)) ? 0 : CounterX+1;
-	if(CounterX==(`FULL_WIDTH-1)) begin
-		if (CounterY==(`FULL_HEIGHT-1)) begin
-			CounterY <= 0;
-			if (scanlineType[0])
-				frame <= !frame;
+	NeoCounterX <= (NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) ? 0 : NeoCounterX+1;
+	if(NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) begin
+		if (NeoCounterY==(`NEOGEO_FULL_HEIGHT-1)) begin
+			NeoCounterY <= 0;
 		end else begin
-			CounterY <= CounterY+1;
+			NeoCounterY <= NeoCounterY+1;
 		end
 	end
 	if (sync) begin
-		if ((CounterY <= `NEOGEO_VSYNC_OFFSET || CounterY > `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET))
-			CounterY <= `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET+1;
-		if (
-			(CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)<`FULL_WIDTH-`NEOGEO_HSYNC_OFFSET &&
-			(CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)>=`DISPLAY_WIDTH-`NEOGEO_HSYNC_OFFSET)
-			CounterX <= (2*(`DISPLAY_WIDTH-`NEOGEO_HSYNC_OFFSET)-`FULL_WIDTH);
+		if (NeoCounterY > `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH)
+			NeoCounterY <= `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+1;
+		if ((NeoCounterX>>1)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)>=`NEOGEO_DISPLAY_WIDTH)
+			NeoCounterX <= 2*`NEOGEO_DISPLAY_WIDTH-`NEOGEO_FULL_WIDTH;
 	end
-	
-	if ((CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)<`DISPLAY_WIDTH) begin
-		if (CounterX[0]) begin
-			videoaddressout<=(CounterY[1]?`DISPLAY_WIDTH:0)+(CounterY[0]?`FULL_WIDTH/2:0)+(CounterX>>1);
+	if ((NeoCounterX>>1)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)<`NEOGEO_DISPLAY_WIDTH) begin
+		if (NeoCounterX[0]) begin
+			videoaddressout<=(NeoCounterY[2:1]*`NEOGEO_DISPLAY_WIDTH)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)+(NeoCounterX>>1);
 			videobusout[4:0]<=Rin;
 			videobusout[9:5]<=Gin;
 			videobusout[14:10]<=Bin;
@@ -130,22 +169,49 @@ begin
 			videobusout[16]<=!sha;
 		end
 	end
-	if (CounterX<`DISPLAY_WIDTH) begin
-		videoaddress<=(CounterY[1]?0:`DISPLAY_WIDTH) + CounterX;
-		if (CounterY[0]==frame || scanlineType==4) begin
-			red <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
-			green <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
-			blue <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
-		end else begin
-			if (!scanlineType[1]) begin
-				red <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
-				green <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
-				blue <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
-			end else begin
-				red <= 0;
-				green <= 0;
-				blue <= 0;
+end
+	
+always @(posedge pixclk)
+begin
+	if(CounterX==(`FULL_WIDTH-1)) begin
+		if (CounterY==(`FULL_HEIGHT-1)) begin
+			// Sync screen output with NeoGeo output
+			// +2 means there's a line in the doubler ready
+			if (NeoCounterY==(`NEOGEO_FULL_HEIGHT-`CENTERING_Y+2) && NeoCounterX==0) begin
+				CounterY <= 0;
+				CounterX <= 0;
+				if (scanlineType[0])
+					frame <= !frame;
 			end
+		end else begin
+			CounterY <= CounterY+1;
+			CounterX <= 0;
+		end
+	end else begin
+		CounterX<=CounterX+1;
+	end
+	if (CounterX>=`CENTERING_X && CounterX<`DISPLAY_WIDTH+`CENTERING_X) begin
+		if ((CounterX-`CENTERING_X)<`NEOGEO_DISPLAY_WIDTH) begin
+			videoaddress<=(CounterY[2:1]*`NEOGEO_DISPLAY_WIDTH) + (CounterX-`CENTERING_X);
+			if (CounterY[0]==frame || scanlineType==4) begin
+				red <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
+				green <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
+				blue <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
+			end else begin
+				if (!scanlineType[1]) begin
+					red <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
+					green <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
+					blue <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
+				end else begin
+					red <= 0;
+					green <= 0;
+					blue <= 0;
+				end
+			end
+		end else begin
+			red <= 0;
+			green <= 0;
+			blue <= 0;			
 		end
 	end
 end
@@ -173,11 +239,15 @@ always @(negedge audioLR) begin curSampleL<=audioInput[0]; curSampleR<=audioInpu
 // HDMI audio packet generator
 ////////////////////////////////////////////////////////////////////////
 
+// Timing for 32KHz audio at 27MHz
+`define AUDIO_TIMER_ADDITION	4
+`define AUDIO_TIMER_LIMIT		3375
+
 localparam [191:0] channelStatus = 192'hc203004004; // 32KHz 16-bit LPCM audio
 reg [23:0] audioPacketHeader;
 reg [55:0] audioSubPacket[3:0];
 reg [7:0] channelStatusIdx;
-reg [10:0] audioTimer;
+reg [11:0] audioTimer;
 reg [9:0] audioSamples;
 reg [1:0] samplesHead;
 reg sendRegenPacket;
@@ -200,11 +270,11 @@ task AudioPacketGeneration;
 	begin
 		// Buffer up an audio sample every 750 pixel clocks (32KHz output from 24MHz pixel clock)
 		// Don't add to the audio output if we're currently sending that packet though
-		if (audioTimer>=749 && !(
+		if (audioTimer>=`AUDIO_TIMER_LIMIT && !(
 			CounterX>=(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE) &&
 			CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE)
 		)) begin
-			audioTimer<=audioTimer-749;
+			audioTimer<=audioTimer-`AUDIO_TIMER_LIMIT+`AUDIO_TIMER_ADDITION;
 			audioPacketHeader<=audioPacketHeader|24'h000002|((channelStatusIdx==0?24'h100100:24'h000100)<<samplesHead);
 			audioSubPacket[samplesHead]<=((curSampleL<<8)|(curSampleR<<32)
 								|((^curSampleL)?56'h08000000000000:56'h0)		// parity bit for left channel
@@ -219,7 +289,7 @@ task AudioPacketGeneration;
 			if (audioSamples[4:0]==0)
 				sendRegenPacket<=1;
 		end else begin
-			audioTimer<=audioTimer+1;
+			audioTimer<=audioTimer+`AUDIO_TIMER_ADDITION;
 		end
 	end
 endtask
@@ -351,21 +421,32 @@ begin
 			preamble<=0;
 			// Set up the first of the packets we'll send
 			if (sendRegenPacket) begin
-				packetHeader<=24'h000001;	// audio clock regeneration packet (N=0x1000 CTS=0x6270)
-				subpacket[0]<=56'h001000c05d0000;	// N=0x1000 CTS=0x5dc0 (24MHz pixel clock -> 32KHz audio clock)
-				subpacket[1]<=56'h001000c05d0000;
-				subpacket[2]<=56'h001000c05d0000;
-				subpacket[3]<=56'h001000c05d0000;
+				packetHeader<=24'h000001;	// audio clock regeneration packet
+				subpacket[0]<=56'h00100078690000;	// N=0x1000 CTS=0x6978 (27MHz pixel clock -> 32KHz audio clock)
+				subpacket[1]<=56'h00100078690000;
+				subpacket[2]<=56'h00100078690000;
+				subpacket[3]<=56'h00100078690000;
 				if (CounterX==(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND-1))
 					sendRegenPacket<=0;
 			end else begin
 				if (!CounterY[0]) begin
 					packetHeader<=24'h0D0282;	// infoframe AVI packet
-					subpacket[0]<=56'h0000010019107b;
-					subpacket[1]<=56'h0501000005bf00;
+					// Byte0: Checksum
+					// Byte1: 10 = 0(Y1:Y0=0 RGB)(A0=1 No active format)(B1:B0=00 No bar info)(S1:S0=00 No scan info)
+					// Byte2: 2A = (C1:C0=0 No colorimetry)(M1:M0=2 16:9)(R3:R0=A 16:9)
+					// Byte3: 00 = 0(SC1:SC0=0 No scaling)
+					// Byte4: 03 = 0(VIC6:VIC0=3 720x480p)
+					// Byte5: 00 = 0(PR5:PR0=0 No repeation)
+					subpacket[0]<=56'h000003002A1032;
+					subpacket[1]<=56'h00000000000000;
 				end else begin
 					packetHeader<=24'h0A0184;	// infoframe audio packet
-					subpacket[0]<=56'h0000000000115f;
+					// Byte0: Checksum
+					// Byte1: 11 = (CT3:0=1 PCM)0(CC2:0=1 2ch)
+					// Byte2: 05 = 000(SF2:0=1 32kHz)(SS1:0=1 16-bit)
+					// Byte3: 00 = LPCM doesn't use this
+					// Byte4-5: 00 Multichannel only (>2ch)
+					subpacket[0]<=56'h0000000005115B;
 					subpacket[1]<=56'h00000000000000;
 				end
 				subpacket[2]<=56'h00000000000000;
@@ -457,6 +538,7 @@ wire [9:0] blueSource = videoGuardBandDelayed ? 10'b1011001100 : (tercDataDelaye
 
 reg [3:0] TMDS_mod10;  // modulus 10 counter
 reg [9:0] TMDS_shift_red, TMDS_shift_green, TMDS_shift_blue;
+reg [9:0] TMDS_shift_red_delay, TMDS_shift_green_delay, TMDS_shift_blue_delay;
 
 initial
 begin
@@ -466,11 +548,18 @@ begin
   TMDS_shift_blue=0;
 end
 
+always @(negedge pixclk)
+begin
+	TMDS_shift_red_delay<=redSource;
+	TMDS_shift_green_delay<=greenSource;
+	TMDS_shift_blue_delay<=blueSource;
+end
+
 always @(posedge clk_TMDS)
 begin
-	TMDS_shift_red   <= (TMDS_mod10==4'd0) ? redSource   : TMDS_shift_red  [9:2];
-	TMDS_shift_green <= (TMDS_mod10==4'd0) ? greenSource : TMDS_shift_green[9:2];
-	TMDS_shift_blue  <= (TMDS_mod10==4'd0) ? blueSource  : TMDS_shift_blue [9:2];	
+	TMDS_shift_red   <= (TMDS_mod10==4'd8) ? TMDS_shift_red_delay   : TMDS_shift_red  [9:2];
+	TMDS_shift_green <= (TMDS_mod10==4'd8) ? TMDS_shift_green_delay : TMDS_shift_green[9:2];
+	TMDS_shift_blue  <= (TMDS_mod10==4'd8) ? TMDS_shift_blue_delay  : TMDS_shift_blue [9:2];	
 	TMDS_mod10 <= (TMDS_mod10==4'd8) ? 4'd0 : TMDS_mod10+4'd2;
 end
 
@@ -480,8 +569,8 @@ assign TMDSp[1]=clk_TMDS?TMDS_shift_green[0]:TMDS_shift_green[1];
 assign TMDSn[1]=!TMDSp[1];
 assign TMDSp[0]=clk_TMDS?TMDS_shift_blue[0]:TMDS_shift_blue[1];
 assign TMDSn[0]=!TMDSp[0];
-assign TMDSp_clock=pixclk;
-assign TMDSn_clock=!pixclk;
+assign TMDSp_clock=(TMDS_mod10==4)?!clk_TMDS:(TMDS_mod10>5);
+assign TMDSn_clock=!TMDSp_clock;
 
 ////////////////////////////////////////////////////////////////////////
 // Scanline method selection button debouncer
