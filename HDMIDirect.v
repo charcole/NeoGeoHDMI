@@ -30,20 +30,21 @@ module HDMIDirectV(
 	output videoramoutclk,
 	output videowrite,
 	output [10:0] videoaddressoutw,
-	output [16:0] videobusoutw
+	output [16:0] videobusoutw,
+	output neogeoclk
 );
 
 ////////////////////////////////////////////////////////////////////////
 
 // Defines to do with video signal generation
-`define DISPLAY_WIDTH			640
+`define DISPLAY_WIDTH			720
 `define DISPLAY_HEIGHT			480
-`define FULL_WIDTH				768 // Should be 800 for 640x480p
-`define FULL_HEIGHT				528 // Should be 525 for 640x480p
+`define FULL_WIDTH				858
+`define FULL_HEIGHT				525
 `define H_FRONT_PORCH			16
-`define H_SYNC						96 
-`define V_FRONT_PORCH			10 
-`define V_SYNC 					2
+`define H_SYNC						62 
+`define V_FRONT_PORCH			9 
+`define V_SYNC 					6
 `define NEOGEO_VSYNC_LENGTH	80
 `define NEOGEO_VSYNC_OFFSET	12	// For centering
 `define NEOGEO_HSYNC_OFFSET	8	// For centering
@@ -58,6 +59,38 @@ module HDMIDirectV(
 `define CTL_END			(`FULL_WIDTH-`VIDEO_PREAMBLE-`VIDEO_GUARDBAND)
 
 wire clk_TMDS = pixclk72;
+
+////////////////////////////////////////////////////////////////////////
+// Neo Geo Clk Gen
+////////////////////////////////////////////////////////////////////////
+
+reg [31:0] neoGeoClks;
+reg neoGeoClk;
+
+initial
+begin
+	neoGeoClks=0;
+	neoGeoClk=0;
+end
+
+// 125/24
+// (800*525*5)/(768*528)
+
+`define NUMERATOR (`FULL_WIDTH*`FULL_HEIGHT*5)
+`define DEMONIATOR (768*528*2)
+
+always @(posedge clk_TMDS)
+begin
+	if (neoGeoClks>=`NUMERATOR)
+	begin
+		neoGeoClks<=neoGeoClks+`DEMONIATOR-`NUMERATOR;
+		neoGeoClk<=!neoGeoClk;
+	end
+	else
+		neoGeoClks<=neoGeoClks+`DEMONIATOR;
+end
+
+assign neogeoclk=neoGeoClk;
 
 ////////////////////////////////////////////////////////////////////////
 // Line doubler
@@ -115,7 +148,7 @@ begin
 			CounterY <= CounterY+1;
 		end
 	end
-	if (sync) begin
+	if (0 && sync) begin
 		if ((CounterY <= `NEOGEO_VSYNC_OFFSET || CounterY > `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET))
 			CounterY <= `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET+1;
 		if (
@@ -354,21 +387,27 @@ begin
 			preamble<=0;
 			// Set up the first of the packets we'll send
 			if (sendRegenPacket) begin
-				packetHeader<=24'h000001;	// audio clock regeneration packet (N=0x1000 CTS=0x6270)
-				subpacket[0]<=56'h001000a8610000;	// N=0x1000 CTS=0x5dc0 (24MHz pixel clock -> 32KHz audio clock)
-				subpacket[1]<=56'h001000a8610000;
-				subpacket[2]<=56'h001000a8610000;
-				subpacket[3]<=56'h001000a8610000;
+				packetHeader<=24'h000001;	// audio clock regeneration packet
+				subpacket[0]<=56'h00100078690000;	// N=0x1000 CTS=0x6978 (27MHz pixel clock -> 32KHz audio clock)
+				subpacket[1]<=56'h00100078690000;
+				subpacket[2]<=56'h00100078690000;
+				subpacket[3]<=56'h00100078690000;
 				if (CounterX==(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND-1))
 					sendRegenPacket<=0;
 			end else begin
 				if (!CounterY[0]) begin
 					packetHeader<=24'h0D0282;	// infoframe AVI packet
-					subpacket[0]<=56'h0000010019107b;
-					subpacket[1]<=56'h0501000005bf00;
+					// Byte0: Checksum
+					// Byte1: 10 = 0(Y1:Y0=0 RGB)(A0=1 No active format)(B1:B0=00 No bar info)(S1:S0=00 No scan info)
+					// Byte2: 2A = (C1:C0=0 No colorimetry)(M1:M0=2 16:9)(R3:R0=A 16:9)
+					// Byte3: 00 = 0(SC1:SC0=0 No scaling)
+					// Byte4: 03 = 0(VIC6:VIC0=3 720x480p)
+					// Byte5: 00 = 0(PR5:PR0=0 No repeation)
+					subpacket[0]<=56'h000003002A1032;
+					subpacket[1]<=56'h00000000000000;
 				end else begin
 					packetHeader<=24'h0A0184;	// infoframe audio packet
-					subpacket[0]<=56'h0000000000115f;
+					subpacket[0]<=56'h00000000001160;
 					subpacket[1]<=56'h00000000000000;
 				end
 				subpacket[2]<=56'h00000000000000;
