@@ -11,7 +11,9 @@
 //		4: Line doubled
 
 module HDMIDirectV(
-	input pixclk, clk_TMDS,  // 24MHz + 120MHz
+	input pixclk,
+	input pixclk72,
+	input pixclk144,
 	input [16:0] videobus,
 	input [4:0] Rin, Gin, Bin,
 	input dak, sha,
@@ -36,8 +38,8 @@ module HDMIDirectV(
 // Defines to do with video signal generation
 `define DISPLAY_WIDTH			640
 `define DISPLAY_HEIGHT			480
-`define FULL_WIDTH				768 // Should be 800 for 640x480p
-`define FULL_HEIGHT				528 // Should be 525 for 640x480p
+`define FULL_WIDTH				800 // Should be 800 for 640x480p
+`define FULL_HEIGHT				525 // Should be 525 for 640x480p
 `define H_FRONT_PORCH			16
 `define H_SYNC						96 
 `define V_FRONT_PORCH			10 
@@ -54,6 +56,8 @@ module HDMIDirectV(
 `define VIDEO_PREAMBLE	8
 `define VIDEO_GUARDBAND	2
 `define CTL_END			(`FULL_WIDTH-`VIDEO_PREAMBLE-`VIDEO_GUARDBAND)
+
+wire clk_TMDS = pixclk72;//pixclk^pixclk72^pixclk144;
 
 ////////////////////////////////////////////////////////////////////////
 // Line doubler
@@ -111,7 +115,7 @@ begin
 			CounterY <= CounterY+1;
 		end
 	end
-	if (sync) begin
+	if (0 && sync) begin
 		if ((CounterY <= `NEOGEO_VSYNC_OFFSET || CounterY > `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET))
 			CounterY <= `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET+1;
 		if (
@@ -119,7 +123,6 @@ begin
 			(CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)>=`DISPLAY_WIDTH-`NEOGEO_HSYNC_OFFSET)
 			CounterX <= (2*(`DISPLAY_WIDTH-`NEOGEO_HSYNC_OFFSET)-`FULL_WIDTH);
 	end
-	
 	if ((CounterX>>1)+(CounterY[0]?`FULL_WIDTH/2:0)<`DISPLAY_WIDTH) begin
 		if (CounterX[0]) begin
 			videoaddressout<=(CounterY[1]?`DISPLAY_WIDTH:0)+(CounterY[0]?`FULL_WIDTH/2:0)+(CounterX>>1);
@@ -200,11 +203,11 @@ task AudioPacketGeneration;
 	begin
 		// Buffer up an audio sample every 750 pixel clocks (32KHz output from 24MHz pixel clock)
 		// Don't add to the audio output if we're currently sending that packet though
-		if (audioTimer>=749 && !(
+		if (audioTimer>=781 && !(
 			CounterX>=(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE) &&
 			CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE)
 		)) begin
-			audioTimer<=audioTimer-749;
+			audioTimer<=audioTimer-781;
 			audioPacketHeader<=audioPacketHeader|24'h000002|((channelStatusIdx==0?24'h100100:24'h000100)<<samplesHead);
 			audioSubPacket[samplesHead]<=((curSampleL<<8)|(curSampleR<<32)
 								|((^curSampleL)?56'h08000000000000:56'h0)		// parity bit for left channel
@@ -352,10 +355,10 @@ begin
 			// Set up the first of the packets we'll send
 			if (sendRegenPacket) begin
 				packetHeader<=24'h000001;	// audio clock regeneration packet (N=0x1000 CTS=0x6270)
-				subpacket[0]<=56'h001000c05d0000;	// N=0x1000 CTS=0x5dc0 (24MHz pixel clock -> 32KHz audio clock)
-				subpacket[1]<=56'h001000c05d0000;
-				subpacket[2]<=56'h001000c05d0000;
-				subpacket[3]<=56'h001000c05d0000;
+				subpacket[0]<=56'h001000a8610000;	// N=0x1000 CTS=0x5dc0 (24MHz pixel clock -> 32KHz audio clock)
+				subpacket[1]<=56'h001000a8610000;
+				subpacket[2]<=56'h001000a8610000;
+				subpacket[3]<=56'h001000a8610000;
 				if (CounterX==(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND-1))
 					sendRegenPacket<=0;
 			end else begin
@@ -457,6 +460,7 @@ wire [9:0] blueSource = videoGuardBandDelayed ? 10'b1011001100 : (tercDataDelaye
 
 reg [3:0] TMDS_mod10;  // modulus 10 counter
 reg [9:0] TMDS_shift_red, TMDS_shift_green, TMDS_shift_blue;
+reg [9:0] TMDS_shift_red_delay, TMDS_shift_green_delay, TMDS_shift_blue_delay;
 
 initial
 begin
@@ -466,11 +470,18 @@ begin
   TMDS_shift_blue=0;
 end
 
+always @(negedge pixclk)
+begin
+	TMDS_shift_red_delay<=redSource;
+	TMDS_shift_green_delay<=greenSource;
+	TMDS_shift_blue_delay<=blueSource;
+end
+
 always @(posedge clk_TMDS)
 begin
-	TMDS_shift_red   <= (TMDS_mod10==4'd0) ? redSource   : TMDS_shift_red  [9:2];
-	TMDS_shift_green <= (TMDS_mod10==4'd0) ? greenSource : TMDS_shift_green[9:2];
-	TMDS_shift_blue  <= (TMDS_mod10==4'd0) ? blueSource  : TMDS_shift_blue [9:2];	
+	TMDS_shift_red   <= (TMDS_mod10==4'd8) ? TMDS_shift_red_delay   : TMDS_shift_red  [9:2];
+	TMDS_shift_green <= (TMDS_mod10==4'd8) ? TMDS_shift_green_delay : TMDS_shift_green[9:2];
+	TMDS_shift_blue  <= (TMDS_mod10==4'd8) ? TMDS_shift_blue_delay  : TMDS_shift_blue [9:2];	
 	TMDS_mod10 <= (TMDS_mod10==4'd8) ? 4'd0 : TMDS_mod10+4'd2;
 end
 
@@ -480,8 +491,8 @@ assign TMDSp[1]=clk_TMDS?TMDS_shift_green[0]:TMDS_shift_green[1];
 assign TMDSn[1]=!TMDSp[1];
 assign TMDSp[0]=clk_TMDS?TMDS_shift_blue[0]:TMDS_shift_blue[1];
 assign TMDSn[0]=!TMDSp[0];
-assign TMDSp_clock=pixclk;
-assign TMDSn_clock=!pixclk;
+assign TMDSp_clock=(TMDS_mod10==4)?!clk_TMDS:(TMDS_mod10>5);
+assign TMDSn_clock=!TMDSp_clock;
 
 ////////////////////////////////////////////////////////////////////////
 // Scanline method selection button debouncer
@@ -524,14 +535,14 @@ wire [3:0] Nb1s = VD[0] + VD[1] + VD[2] + VD[3] + VD[4] + VD[5] + VD[6] + VD[7];
 wire XNOR = (Nb1s>4'd4) || (Nb1s==4'd4 && VD[0]==1'b0);
 wire [8:0] q_m = {~XNOR, q_m[6:0] ^ VD[7:1] ^ {7{XNOR}}, VD[0]};
 
-reg [3:0] balance_acc;
+reg [4:0] balance_acc;
 
 initial begin
 	balance_acc=0;
 end
 
 wire [3:0] balance = q_m[0] + q_m[1] + q_m[2] + q_m[3] + q_m[4] + q_m[5] + q_m[6] + q_m[7] - 4'd4;
-wire balance_sign_eq = (balance[3] == balance_acc[3]);
+wire balance_sign_eq = (balance[3] == balance_acc[4]);
 wire invert_q_m = (balance==0 || balance_acc==0) ? ~q_m[8] : balance_sign_eq;
 wire [3:0] balance_acc_inc = balance - ({q_m[8] ^ ~balance_sign_eq} & ~(balance==0 || balance_acc==0));
 wire [3:0] balance_acc_new = invert_q_m ? balance_acc-balance_acc_inc : balance_acc+balance_acc_inc;
