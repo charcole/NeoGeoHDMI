@@ -38,8 +38,8 @@ module HDMIDirectV(
 // Defines to do with video signal generation
 `define DISPLAY_WIDTH			640
 `define DISPLAY_HEIGHT			480
-`define FULL_WIDTH				800 // Should be 800 for 640x480p
-`define FULL_HEIGHT				525 // Should be 525 for 640x480p
+`define FULL_WIDTH				768 // Should be 800 for 640x480p
+`define FULL_HEIGHT				528 // Should be 525 for 640x480p
 `define H_FRONT_PORCH			16
 `define H_SYNC						96 
 `define V_FRONT_PORCH			10 
@@ -57,7 +57,7 @@ module HDMIDirectV(
 `define VIDEO_GUARDBAND	2
 `define CTL_END			(`FULL_WIDTH-`VIDEO_PREAMBLE-`VIDEO_GUARDBAND)
 
-wire clk_TMDS = pixclk^pixclk72^pixclk144;
+wire clk_TMDS = pixclk72;
 
 ////////////////////////////////////////////////////////////////////////
 // Line doubler
@@ -115,7 +115,7 @@ begin
 			CounterY <= CounterY+1;
 		end
 	end
-	if (0 && sync) begin
+	if (sync) begin
 		if ((CounterY <= `NEOGEO_VSYNC_OFFSET || CounterY > `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET))
 			CounterY <= `FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+`NEOGEO_VSYNC_OFFSET+1;
 		if (
@@ -333,7 +333,6 @@ endtask
 
 always @(posedge pixclk)
 begin
-/*
 	AudioPacketGeneration();
 	// Start sending audio data if we're in the right part of the hsync period
 	if (CounterX>=`DATA_START)
@@ -415,7 +414,6 @@ begin
 	begin
 		videoGuardBand<=0;
 	end
-	*/
 end
 
 ////////////////////////////////////////////////////////////////////////
