@@ -70,7 +70,10 @@ wire clk_TMDS = pixclk72;
 // Neo Geo Clk Gen
 ////////////////////////////////////////////////////////////////////////
 
-reg [31:0] neoGeoClks;
+`define NEOGEOCLK_LIMIT    (`FULL_WIDTH*`FULL_HEIGHT*5) // 5x as TMDS clock is 5x pixclk
+`define NEOGEOCLK_ADDITION (`NEOGEO_FULL_WIDTH*`NEOGEO_FULL_HEIGHT*2) // 2x as want 2 transitions
+
+reg [23:0] neoGeoClks;
 reg neoGeoClk;
 
 initial
@@ -79,21 +82,15 @@ begin
 	neoGeoClk=0;
 end
 
-// 125/24
-// (800*525*5)/(768*528)
-
-`define NUMERATOR (`FULL_WIDTH*`FULL_HEIGHT*5)
-`define DEMONIATOR (768*528*2)
-
 always @(posedge clk_TMDS)
 begin
-	if (neoGeoClks>=`NUMERATOR)
+	if (neoGeoClks>=`NEOGEOCLK_LIMIT)
 	begin
-		neoGeoClks<=neoGeoClks+`DEMONIATOR-`NUMERATOR;
+		neoGeoClks<=neoGeoClks+`NEOGEOCLK_ADDITION-`NEOGEOCLK_LIMIT;
 		neoGeoClk<=!neoGeoClk;
 	end
 	else
-		neoGeoClks<=neoGeoClks+`DEMONIATOR;
+		neoGeoClks<=neoGeoClks+`NEOGEOCLK_ADDITION;
 end
 
 assign neogeoclk=neoGeoClk;
@@ -242,11 +239,15 @@ always @(negedge audioLR) begin curSampleL<=audioInput[0]; curSampleR<=audioInpu
 // HDMI audio packet generator
 ////////////////////////////////////////////////////////////////////////
 
+// Timing for 32KHz audio at 27MHz
+`define AUDIO_TIMER_ADDITION	4
+`define AUDIO_TIMER_LIMIT		3375
+
 localparam [191:0] channelStatus = 192'hc203004004; // 32KHz 16-bit LPCM audio
 reg [23:0] audioPacketHeader;
 reg [55:0] audioSubPacket[3:0];
 reg [7:0] channelStatusIdx;
-reg [10:0] audioTimer;
+reg [11:0] audioTimer;
 reg [9:0] audioSamples;
 reg [1:0] samplesHead;
 reg sendRegenPacket;
@@ -269,11 +270,11 @@ task AudioPacketGeneration;
 	begin
 		// Buffer up an audio sample every 750 pixel clocks (32KHz output from 24MHz pixel clock)
 		// Don't add to the audio output if we're currently sending that packet though
-		if (audioTimer>=781 && !(
+		if (audioTimer>=`AUDIO_TIMER_LIMIT && !(
 			CounterX>=(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE) &&
 			CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE)
 		)) begin
-			audioTimer<=audioTimer-781;
+			audioTimer<=audioTimer-`AUDIO_TIMER_LIMIT+`AUDIO_TIMER_ADDITION;
 			audioPacketHeader<=audioPacketHeader|24'h000002|((channelStatusIdx==0?24'h100100:24'h000100)<<samplesHead);
 			audioSubPacket[samplesHead]<=((curSampleL<<8)|(curSampleR<<32)
 								|((^curSampleL)?56'h08000000000000:56'h0)		// parity bit for left channel
@@ -288,7 +289,7 @@ task AudioPacketGeneration;
 			if (audioSamples[4:0]==0)
 				sendRegenPacket<=1;
 		end else begin
-			audioTimer<=audioTimer+1;
+			audioTimer<=audioTimer+`AUDIO_TIMER_ADDITION;
 		end
 	end
 endtask
@@ -440,7 +441,12 @@ begin
 					subpacket[1]<=56'h00000000000000;
 				end else begin
 					packetHeader<=24'h0A0184;	// infoframe audio packet
-					subpacket[0]<=56'h00000000001160;
+					// Byte0: Checksum
+					// Byte1: 11 = (CT3:0=1 PCM)0(CC2:0=1 2ch)
+					// Byte2: 05 = 000(SF2:0=1 32kHz)(SS1:0=1 16-bit)
+					// Byte3: 00 = LPCM doesn't use this
+					// Byte4-5: 00 Multichannel only (>2ch)
+					subpacket[0]<=56'h0000000005115B;
 					subpacket[1]<=56'h00000000000000;
 				end
 				subpacket[2]<=56'h00000000000000;
