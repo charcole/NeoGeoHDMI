@@ -558,11 +558,11 @@ begin
   TMDS_shift_blue=0;
 end
 
-always @(negedge pixclk)
+always @(posedge pixclk)
 begin
-	TMDS_shift_red_delay<=redSource;
-	TMDS_shift_green_delay<=greenSource;
-	TMDS_shift_blue_delay<=blueSource;
+	TMDS_shift_red_delay<=videoGuardBandDelayed ? 10'b1011001100 : (dataGuardBandDelayed ? 10'b0100110011 : (tercDataDelayed ? TERC4_red : TMDS_red));
+	TMDS_shift_green_delay<=(dataGuardBandDelayed || videoGuardBandDelayed) ? 10'b0100110011 : (tercDataDelayed ? TERC4_green : TMDS_green);
+	TMDS_shift_blue_delay<=videoGuardBandDelayed ? 10'b1011001100 : (tercDataDelayed ? TERC4_blue : TMDS_blue);
 end
 
 always @(posedge clk_TMDS)
@@ -586,7 +586,7 @@ assign TMDSn_clock=!TMDSp_clock;
 // Scanline method selection button debouncer
 ////////////////////////////////////////////////////////////////////////
 
-reg [15:0] buttonDebounce;
+reg [16:0] buttonDebounce;
 
 initial
 begin
@@ -599,7 +599,7 @@ begin
 		if (buttonDebounce!=0)
 			scanlineType<=scanlineType!=4?scanlineType+1:0;
 		buttonDebounce<=0;
-	end else if (buttonDebounce!='hffff) begin	// Audio clock is 6MHz so this is about 11ms
+	end else if (buttonDebounce!='h1ffff) begin	// Audio clock is 6MHz so this is about 22ms
 		buttonDebounce<=buttonDebounce+1;
 	end
 end
@@ -621,24 +621,27 @@ module TMDS_encoder(
 
 wire [3:0] Nb1s = VD[0] + VD[1] + VD[2] + VD[3] + VD[4] + VD[5] + VD[6] + VD[7];
 wire XNOR = (Nb1s>4'd4) || (Nb1s==4'd4 && VD[0]==1'b0);
-wire [8:0] q_m = {~XNOR, q_m[6:0] ^ VD[7:1] ^ {7{XNOR}}, VD[0]};
+wire [8:0] q_m={~XNOR,^VD[7:0]^XNOR,^VD[6:0],^VD[5:0]^XNOR,^VD[4:0],^VD[3:0]^XNOR,^VD[2:0],^VD[1:0]^XNOR,VD[0]};
 
-reg [4:0] balance_acc;
+reg [3:0] balance_acc;
 
 initial begin
 	balance_acc=0;
 end
 
 wire [3:0] balance = q_m[0] + q_m[1] + q_m[2] + q_m[3] + q_m[4] + q_m[5] + q_m[6] + q_m[7] - 4'd4;
-wire balance_sign_eq = (balance[3] == balance_acc[4]);
+wire balance_sign_eq = (balance[3] == balance_acc[3]);
 wire invert_q_m = (balance==0 || balance_acc==0) ? ~q_m[8] : balance_sign_eq;
 wire [3:0] balance_acc_inc = balance - ({q_m[8] ^ ~balance_sign_eq} & ~(balance==0 || balance_acc==0));
 wire [3:0] balance_acc_new = invert_q_m ? balance_acc-balance_acc_inc : balance_acc+balance_acc_inc;
 wire [9:0] TMDS_data = {invert_q_m, q_m[8], q_m[7:0] ^ {8{invert_q_m}}};
 wire [9:0] TMDS_code = CD[1] ? (CD[0] ? 10'b1010101011 : 10'b0101010100) : (CD[0] ? 10'b0010101011 : 10'b1101010100);
 
-always @(posedge clk) TMDS <= VDE ? TMDS_data : TMDS_code;
-always @(posedge clk) balance_acc <= VDE ? balance_acc_new : 4'h0;
+always @(negedge clk)
+begin
+	TMDS <= VDE ? TMDS_data : TMDS_code;
+	balance_acc <= VDE ? balance_acc_new : 0;
+end
 endmodule
 
 ////////////////////////////////////////////////////////////////////////
