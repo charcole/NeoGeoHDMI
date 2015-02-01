@@ -2,7 +2,6 @@
 // HDMI output for Neo Geo MVS
 //   Originally based on fpga4fun.com HDMI/DVI sample code (c) fpga4fun.com & KNJN LLC 2013
 //   Added Neo Geo MVS input, scan doubling, HDMI data packets and audio
-//   HDMI output is out of spec by necessity so won't work on all TVs/monitors
 //   Offers fake scanline generation (select via button)
 //		0: Line doubled but even lines are half brightness
 //		1: Line doubled but even lines are half brightness on even frames and vice versa
@@ -43,7 +42,7 @@ module HDMIDirectV(
 `define FULL_HEIGHT				525
 `define H_FRONT_PORCH			16
 `define H_SYNC						62 
-`define V_FRONT_PORCH			9 
+`define V_FRONT_PORCH			9
 `define V_SYNC 					6
 
 `define NEOGEO_DISPLAY_WIDTH	640
@@ -140,8 +139,14 @@ assign videobusoutw=videobusout;
 assign videoaddressw=videoaddress;
 
 always @(posedge pixclk) DrawArea <= (CounterX<`DISPLAY_WIDTH) && (CounterY<`DISPLAY_HEIGHT);
-always @(posedge pixclk) hSync <= (CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC));
-always @(posedge pixclk) vSync <= (CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH)) && (CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC));
+always @(posedge pixclk) hSync <= !((CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) && (CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH+`H_SYNC)));
+always @(posedge pixclk) vSync <= !((
+	(CounterY==(`DISPLAY_HEIGHT+`V_FRONT_PORCH-1) && CounterX>=(`DISPLAY_WIDTH+`H_FRONT_PORCH)) ||
+	CounterY>=(`DISPLAY_HEIGHT+`V_FRONT_PORCH))
+ && (
+	(CounterY==(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC-1) && CounterX<(`DISPLAY_WIDTH+`H_FRONT_PORCH)) ||
+	CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC-1)
+ )); // VSync and HSync seem to need to transition at the same time
 
 always @(negedge neogeoclk)
 begin
@@ -270,26 +275,31 @@ task AudioPacketGeneration;
 	begin
 		// Buffer up an audio sample every 750 pixel clocks (32KHz output from 24MHz pixel clock)
 		// Don't add to the audio output if we're currently sending that packet though
-		if (audioTimer>=`AUDIO_TIMER_LIMIT && !(
+		if (!(
 			CounterX>=(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE) &&
 			CounterX<(`DATA_START+`DATA_PREAMBLE+`DATA_GUARDBAND+`DATA_SIZE+`DATA_SIZE)
 		)) begin
-			audioTimer<=audioTimer-`AUDIO_TIMER_LIMIT+`AUDIO_TIMER_ADDITION;
-			audioPacketHeader<=audioPacketHeader|24'h000002|((channelStatusIdx==0?24'h100100:24'h000100)<<samplesHead);
-			audioSubPacket[samplesHead]<=((curSampleL<<8)|(curSampleR<<32)
-								|((^curSampleL)?56'h08000000000000:56'h0)		// parity bit for left channel
-								|((^curSampleR)?56'h80000000000000:56'h0))	// parity bit for right channel
-								^(channelStatus[channelStatusIdx]?56'hCC000000000000:56'h0); // And channel status bit and adjust parity
-			if (channelStatusIdx<191)
-				channelStatusIdx<=channelStatusIdx+1;
-			else
-				channelStatusIdx<=0;
-			samplesHead<=samplesHead+1;
-			audioSamples<=audioSamples+1;
-			if (audioSamples[4:0]==0)
-				sendRegenPacket<=1;
+			if (audioTimer>=`AUDIO_TIMER_LIMIT) begin
+				audioTimer<=audioTimer-`AUDIO_TIMER_LIMIT+`AUDIO_TIMER_ADDITION;
+				audioPacketHeader<=audioPacketHeader|24'h000002|((channelStatusIdx==0?24'h100100:24'h000100)<<samplesHead);
+				audioSubPacket[samplesHead]<=((curSampleL<<8)|(curSampleR<<32)
+									|((^curSampleL)?56'h08000000000000:56'h0)		// parity bit for left channel
+									|((^curSampleR)?56'h80000000000000:56'h0))	// parity bit for right channel
+									^(channelStatus[channelStatusIdx]?56'hCC000000000000:56'h0); // And channel status bit and adjust parity
+				if (channelStatusIdx<191)
+					channelStatusIdx<=channelStatusIdx+1;
+				else
+					channelStatusIdx<=0;
+				samplesHead<=samplesHead+1;
+				audioSamples<=audioSamples+1;
+				if (audioSamples[4:0]==0)
+					sendRegenPacket<=1;
+			end else begin
+				audioTimer<=audioTimer+`AUDIO_TIMER_ADDITION;
+			end
 		end else begin
 			audioTimer<=audioTimer+`AUDIO_TIMER_ADDITION;
+			samplesHead<=0;
 		end
 	end
 endtask
@@ -443,10 +453,10 @@ begin
 					packetHeader<=24'h0A0184;	// infoframe audio packet
 					// Byte0: Checksum
 					// Byte1: 11 = (CT3:0=1 PCM)0(CC2:0=1 2ch)
-					// Byte2: 05 = 000(SF2:0=1 32kHz)(SS1:0=1 16-bit)
+					// Byte2: 00 = 000(SF2:0=0 As stream)(SS1:0=0 As stream)
 					// Byte3: 00 = LPCM doesn't use this
 					// Byte4-5: 00 Multichannel only (>2ch)
-					subpacket[0]<=56'h0000000005115B;
+					subpacket[0]<=56'h00000000001160;
 					subpacket[1]<=56'h00000000000000;
 				end
 				subpacket[2]<=56'h00000000000000;
@@ -613,14 +623,14 @@ wire [3:0] Nb1s = VD[0] + VD[1] + VD[2] + VD[3] + VD[4] + VD[5] + VD[6] + VD[7];
 wire XNOR = (Nb1s>4'd4) || (Nb1s==4'd4 && VD[0]==1'b0);
 wire [8:0] q_m = {~XNOR, q_m[6:0] ^ VD[7:1] ^ {7{XNOR}}, VD[0]};
 
-reg [3:0] balance_acc;
+reg [4:0] balance_acc;
 
 initial begin
 	balance_acc=0;
 end
 
 wire [3:0] balance = q_m[0] + q_m[1] + q_m[2] + q_m[3] + q_m[4] + q_m[5] + q_m[6] + q_m[7] - 4'd4;
-wire balance_sign_eq = (balance[3] == balance_acc[3]);
+wire balance_sign_eq = (balance[3] == balance_acc[4]);
 wire invert_q_m = (balance==0 || balance_acc==0) ? ~q_m[8] : balance_sign_eq;
 wire [3:0] balance_acc_inc = balance - ({q_m[8] ^ ~balance_sign_eq} & ~(balance==0 || balance_acc==0));
 wire [3:0] balance_acc_new = invert_q_m ? balance_acc-balance_acc_inc : balance_acc+balance_acc_inc;
