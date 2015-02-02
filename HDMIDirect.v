@@ -509,22 +509,30 @@ end
 // Encodes video data (TMDS) or packet data (TERC4) ready for sending
 ////////////////////////////////////////////////////////////////////////
 
-reg tercDataDelayed;
-reg videoGuardBandDelayed;
-reg dataGuardBandDelayed;
+reg tercDataDelayed [1:0];
+reg videoGuardBandDelayed [1:0];
+reg dataGuardBandDelayed [1:0];
 
 initial
 begin
-	tercDataDelayed=0;
-	videoGuardBandDelayed=0;
-	dataGuardBandDelayed=0;
+	tercDataDelayed[0]=0;
+	tercDataDelayed[1]=0;
+	videoGuardBandDelayed[0]=0;
+	videoGuardBandDelayed[1]=0;
+	dataGuardBandDelayed[0]=0;
+	dataGuardBandDelayed[1]=0;
 end
 
 always @(posedge pixclk)
 begin
-	tercDataDelayed<=tercData;	// To account for delay through encoder
-	videoGuardBandDelayed<=videoGuardBand;
-	dataGuardBandDelayed<=dataGuardBand;
+	// Cycle 1
+	tercDataDelayed[0]<=tercData;	// To account for delay through encoder
+	videoGuardBandDelayed[0]<=videoGuardBand;
+	dataGuardBandDelayed[0]<=dataGuardBand;
+	// Cycle 2
+	tercDataDelayed[1]<=tercDataDelayed[0];
+	videoGuardBandDelayed[1]<=videoGuardBandDelayed[0];
+	dataGuardBandDelayed[1]<=dataGuardBandDelayed[0];
 end
 
 wire [9:0] TMDS_red, TMDS_green, TMDS_blue;
@@ -536,10 +544,6 @@ wire [9:0] TERC4_red, TERC4_green, TERC4_blue;
 TERC4_encoder encode_R4(.clk(pixclk), .data(dataChannel2), .TERC(TERC4_red));
 TERC4_encoder encode_G4(.clk(pixclk), .data(dataChannel1), .TERC(TERC4_green));
 TERC4_encoder encode_B4(.clk(pixclk), .data(dataChannel0), .TERC(TERC4_blue));
-
-wire [9:0] redSource = videoGuardBandDelayed ? 10'b1011001100 : (dataGuardBandDelayed ? 10'b0100110011 : (tercDataDelayed ? TERC4_red : TMDS_red));
-wire [9:0] greenSource = (dataGuardBandDelayed || videoGuardBandDelayed) ? 10'b0100110011 : (tercDataDelayed ? TERC4_green : TMDS_green);
-wire [9:0] blueSource = videoGuardBandDelayed ? 10'b1011001100 : (tercDataDelayed ? TERC4_blue : TMDS_blue);
 
 ////////////////////////////////////////////////////////////////////////
 // HDMI data serialiser
@@ -556,13 +560,16 @@ begin
   TMDS_shift_red=0;
   TMDS_shift_green=0;
   TMDS_shift_blue=0;
+  TMDS_shift_red_delay=0;
+  TMDS_shift_green_delay=0;
+  TMDS_shift_blue_delay=0;
 end
 
 always @(posedge pixclk)
 begin
-	TMDS_shift_red_delay<=videoGuardBandDelayed ? 10'b1011001100 : (dataGuardBandDelayed ? 10'b0100110011 : (tercDataDelayed ? TERC4_red : TMDS_red));
-	TMDS_shift_green_delay<=(dataGuardBandDelayed || videoGuardBandDelayed) ? 10'b0100110011 : (tercDataDelayed ? TERC4_green : TMDS_green);
-	TMDS_shift_blue_delay<=videoGuardBandDelayed ? 10'b1011001100 : (tercDataDelayed ? TERC4_blue : TMDS_blue);
+	TMDS_shift_red_delay<=videoGuardBandDelayed[1] ? 10'b1011001100 : (dataGuardBandDelayed[1] ? 10'b0100110011 : (tercDataDelayed[1] ? TERC4_red : TMDS_red));
+	TMDS_shift_green_delay<=(dataGuardBandDelayed[1] || videoGuardBandDelayed[1]) ? 10'b0100110011 : (tercDataDelayed[1] ? TERC4_green : TMDS_green);
+	TMDS_shift_blue_delay<=videoGuardBandDelayed[1] ? 10'b1011001100 : (tercDataDelayed[1] ? TERC4_blue : TMDS_blue);
 end
 
 always @(posedge clk_TMDS)
@@ -596,7 +603,7 @@ end
 always @(posedge audioClk)
 begin
 	if (!button) begin
-		if (buttonDebounce!=0)
+		if (buttonDebounce=='h1ffff)
 			scanlineType<=scanlineType!=4?scanlineType+1:0;
 		buttonDebounce<=0;
 	end else if (buttonDebounce!='h1ffff) begin	// Audio clock is 6MHz so this is about 22ms
@@ -619,29 +626,60 @@ module TMDS_encoder(
 	output reg [9:0] TMDS
 );
 
-wire [3:0] Nb1s = VD[0] + VD[1] + VD[2] + VD[3] + VD[4] + VD[5] + VD[6] + VD[7];
-wire XNOR = (Nb1s>4'd4) || (Nb1s==4'd4 && VD[0]==1'b0);
-wire [8:0] q_m={~XNOR,^VD[7:0]^XNOR,^VD[6:0],^VD[5:0]^XNOR,^VD[4:0],^VD[3:0]^XNOR,^VD[2:0],^VD[1:0]^XNOR,VD[0]};
-
 reg [3:0] balance_acc;
+reg [8:0] q_m;
+reg [1:0] CD2;
+reg VDE2;
 
 initial begin
 	balance_acc=0;
+	q_m=0;
+	CD2=0;
+	VDE2=0;
 end
 
-wire [3:0] balance = q_m[0] + q_m[1] + q_m[2] + q_m[3] + q_m[4] + q_m[5] + q_m[6] + q_m[7] - 4'd4;
-wire balance_sign_eq = (balance[3] == balance_acc[3]);
-wire invert_q_m = (balance==0 || balance_acc==0) ? ~q_m[8] : balance_sign_eq;
-wire [3:0] balance_acc_inc = balance - ({q_m[8] ^ ~balance_sign_eq} & ~(balance==0 || balance_acc==0));
-wire [3:0] balance_acc_new = invert_q_m ? balance_acc-balance_acc_inc : balance_acc+balance_acc_inc;
-wire [9:0] TMDS_data = {invert_q_m, q_m[8], q_m[7:0] ^ {8{invert_q_m}}};
-wire [9:0] TMDS_code = CD[1] ? (CD[0] ? 10'b1010101011 : 10'b0101010100) : (CD[0] ? 10'b0010101011 : 10'b1101010100);
+function [3:0] balance;
+	input [7:0] qm;
+	begin
+		balance = qm[0] + qm[1] + qm[2] + qm[3] + qm[4] + qm[5] + qm[6] + qm[7] - 4'd4;
+	end
+endfunction
 
-always @(negedge clk)
+always @(posedge clk)
 begin
-	TMDS <= VDE ? TMDS_data : TMDS_code;
-	balance_acc <= VDE ? balance_acc_new : 0;
+	// Cycle 1
+	if ((VD[0] + VD[1] + VD[2] + VD[3] + VD[4] + VD[5] + VD[6] + VD[7])>(VD[0]?4'd4:4'd3)) begin
+		q_m <= {1'b0,~^VD[7:0],^VD[6:0],~^VD[5:0],^VD[4:0],~^VD[3:0],^VD[2:0],~^VD[1:0],VD[0]};
+	end else begin
+		q_m <= {1'b1, ^VD[7:0],^VD[6:0], ^VD[5:0],^VD[4:0], ^VD[3:0],^VD[2:0], ^VD[1:0],VD[0]};
+	end
+	VDE2 <= VDE;
+	CD2 <= CD;
+	// Cycle 2
+	if (VDE2) begin
+		if (balance(q_m)==0 || balance_acc==0) begin
+			if (q_m[8]) begin
+				TMDS <= {1'b0, q_m[8], q_m[7:0]};
+				balance_acc <= balance_acc+balance(q_m);
+			end else begin
+				TMDS <= {1'b1, q_m[8], ~q_m[7:0]};
+				balance_acc <= balance_acc-balance(q_m);
+			end
+		end else begin
+			if (balance(q_m)>>3 == balance_acc[3]) begin
+				TMDS <= {1'b1, q_m[8], ~q_m[7:0]};
+				balance_acc <= balance_acc+q_m[8]-balance(q_m);
+			end else begin
+				TMDS <= {1'b0, q_m[8], q_m[7:0]};
+				balance_acc <= balance_acc-(~q_m[8])+balance(q_m);
+			end
+		end
+	end else begin
+		balance_acc <= 0;
+		TMDS <= CD2[1] ? (CD2[0] ? 10'b1010101011 : 10'b0101010100) : (CD2[0] ? 10'b0010101011 : 10'b1101010100);
+	end
 end
+
 endmodule
 
 ////////////////////////////////////////////////////////////////////////
@@ -655,26 +693,36 @@ module TERC4_encoder(
 	output reg [9:0] TERC
 );
 
+reg [9:0] TERC_pre;
+
+initial
+begin
+	TERC_pre=0;
+end
+
 always @(posedge clk)
 begin
+	// Cycle 1
 	case (data)
-		4'b0000: TERC <= 10'b1010011100;
-		4'b0001: TERC <= 10'b1001100011;
-		4'b0010: TERC <= 10'b1011100100;
-		4'b0011: TERC <= 10'b1011100010;
-		4'b0100: TERC <= 10'b0101110001;
-		4'b0101: TERC <= 10'b0100011110;
-		4'b0110: TERC <= 10'b0110001110;
-		4'b0111: TERC <= 10'b0100111100;
-		4'b1000: TERC <= 10'b1011001100;
-		4'b1001: TERC <= 10'b0100111001;
-		4'b1010: TERC <= 10'b0110011100;
-		4'b1011: TERC <= 10'b1011000110;
-		4'b1100: TERC <= 10'b1010001110;
-		4'b1101: TERC <= 10'b1001110001;
-		4'b1110: TERC <= 10'b0101100011;
-		4'b1111: TERC <= 10'b1011000011;
+		4'b0000: TERC_pre <= 10'b1010011100;
+		4'b0001: TERC_pre <= 10'b1001100011;
+		4'b0010: TERC_pre <= 10'b1011100100;
+		4'b0011: TERC_pre <= 10'b1011100010;
+		4'b0100: TERC_pre <= 10'b0101110001;
+		4'b0101: TERC_pre <= 10'b0100011110;
+		4'b0110: TERC_pre <= 10'b0110001110;
+		4'b0111: TERC_pre <= 10'b0100111100;
+		4'b1000: TERC_pre <= 10'b1011001100;
+		4'b1001: TERC_pre <= 10'b0100111001;
+		4'b1010: TERC_pre <= 10'b0110011100;
+		4'b1011: TERC_pre <= 10'b1011000110;
+		4'b1100: TERC_pre <= 10'b1010001110;
+		4'b1101: TERC_pre <= 10'b1001110001;
+		4'b1110: TERC_pre <= 10'b0101100011;
+		4'b1111: TERC_pre <= 10'b1011000011;
 	endcase
+	// Cycle 2
+	TERC <= TERC_pre;
 end
 
 endmodule
