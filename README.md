@@ -1,12 +1,14 @@
 HDMI output for NeoGeo MVS
 ==========================
 
-Full write up and video coming soon. Honest :)
-
 Summary: The digital video and audio outputs from the Neo Geo MVS are tapped off before going through the DACs. Instead an FPGA reads the data and outputs the signal over HDMI forming a direct digital to digital connection.
 
-This project might be notable in that it's one of the very few (that I know of) that features working audio over HDMI.
+_This project might also be notable in that it's one of the very few (that I know of) that features working audio over HDMI._
 
-The NeoGeo MVS using the default clock outputs video at 59.1 frames per second. To allow for an HDMI signal that is within the spec the NeoGeo's clock is driven from the FPGA to produce exactly 60 frames per second.
+<a href="http://www.youtube.com/watch?feature=player_embedded&v=humublc3Fqs
+" target="_blank"><img src="http://img.youtube.com/vi/humublc3Fqs/0.jpg" 
+alt="IMAGE ALT TEXT HERE" width="480" height="360" border="10" /></a>
+
+The FPGA generates the HDMI video signal with data islands to embed the audio. It also controls the clock of the Neo Geo MVS so it can produce the exact 720x480p at 60fps timing that the HDMI specification demands. See the [notes](Notes.md) for more details.
 
 *Nb. The code was originally based off the HDMI/DVI sample code from [fpga4fun.com](http://www.fpga4fun.com/HDMI.html).*
