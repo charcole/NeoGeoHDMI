@@ -21,6 +21,7 @@ module HDMIDirectV(
 	input audioLR,
 	input audioClk,
 	input audioData,
+	input [7:0] fontData,
 	output [2:0] TMDSp, TMDSn,
 	output TMDSp_clock, TMDSn_clock,
 	output [11:0] videoaddressw,
@@ -30,7 +31,9 @@ module HDMIDirectV(
 	output videowrite,
 	output [11:0] videoaddressoutw,
 	output [16:0] videobusoutw,
-	output neogeoclk
+	output neogeoclk,
+	output [9:0] fontAddress,
+	output fontROMClock
 );
 
 ////////////////////////////////////////////////////////////////////////
@@ -101,20 +104,22 @@ assign neogeoclk=neoGeoClk;
 // Also takes care of centring the picture (using the sync input).
 ////////////////////////////////////////////////////////////////////////
 
-reg [7:0] red, green, blue;
+reg [7:0] redneo, greenneo, blueneo;
 reg [9:0] CounterX, CounterY;
 reg [9:0] NeoCounterX, NeoCounterY;
 reg [11:0] videoaddress;
 reg [11:0] videoaddressout;
 reg [16:0] videobusout;
 reg [2:0] scanlineType;
+reg [23:0] syncWait;
+reg bOverlay;
 reg hSync, vSync, DrawArea, frame;
 
 initial
 begin
-	red=0;
-	green=0;
-	blue=0;
+	redneo=0;
+	greenneo=0;
+	blueneo=0;
 	CounterX=0;
 	CounterY=0;
 	videoaddress=0;
@@ -125,6 +130,8 @@ begin
 	vSync=0;
 	DrawArea=0;
 	frame=0;
+	syncWait=0;
+	bOverlay=0;
 	
 	NeoCounterX=0;
 	NeoCounterY=0;
@@ -183,10 +190,18 @@ begin
 			// Sync screen output with NeoGeo output
 			// +2 means there's a line in the doubler ready
 			if (NeoCounterY==(`NEOGEO_FULL_HEIGHT-`CENTERING_Y+2) && NeoCounterX==0) begin
+				syncWait <= 0;
+				bOverlay <= 0;
 				CounterY <= 0;
 				CounterX <= 0;
 				if (scanlineType[0])
 					frame <= !frame;
+			end else if (syncWait==24'hFFFFFF) begin // If not synced within half a second then display error
+				bOverlay <= 1;
+				CounterY <= 0;
+				CounterX <= 0;
+			end else begin
+				syncWait <= syncWait + 1;
 			end
 		end else begin
 			CounterY <= CounterY+1;
@@ -199,25 +214,82 @@ begin
 		if ((CounterX-`CENTERING_X)<`NEOGEO_DISPLAY_WIDTH) begin
 			videoaddress<=(CounterY[2:1]*`NEOGEO_DISPLAY_WIDTH) + (CounterX-`CENTERING_X);
 			if (CounterY[0]==frame || scanlineType==4) begin
-				red <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
-				green <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
-				blue <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
+				redneo <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
+				greenneo <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
+				blueneo <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
 			end else begin
 				if (!scanlineType[1]) begin
-					red <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
-					green <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
-					blue <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
+					redneo <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
+					greenneo <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
+					blueneo <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
 				end else begin
-					red <= 0;
-					green <= 0;
-					blue <= 0;
+					redneo <= 0;
+					greenneo <= 0;
+					blueneo <= 0;
 				end
 			end
 		end else begin
-			red <= 0;
-			green <= 0;
-			blue <= 0;			
+			redneo <= 0;
+			greenneo <= 0;
+			blueneo <= 0;			
 		end
+	end
+end
+
+////////////////////////////////////////////////////////////////////////
+// Error overlay
+////////////////////////////////////////////////////////////////////////
+
+reg [7:0] red, green, blue;
+reg [9:0] fontAddr;
+reg [2:0] idx;
+reg [3:0] charIdx;
+reg [6:0] char;
+reg [7:0] scroll;
+
+localparam [16*8:0] string = "+ Hello World! +";
+
+initial
+begin
+	red=0;
+	green=0;
+	blue=0;
+	fontAddr=0;
+	idx=0;
+	char=0;
+	scroll=0;
+end
+
+assign fontROMClock = pixclk;
+assign fontAddress = fontAddr;
+
+always @(posedge pixclk)
+begin
+	if (bOverlay && CounterY<16 && CounterX!=0) begin
+		red <= fontData[(CounterY>>1)&7]?0:0;
+		green <= fontData[(CounterY>>1)&7]?255:0;
+		blue <= fontData[(CounterY>>1)&7]?0:0;
+		if (CounterX&1) begin
+			if (idx==5 || ((char!=0 || idx>2) && fontData==0)) begin
+				idx <= 0;
+				charIdx <= charIdx - 1;
+				char <= ((string>>8*charIdx)&'h7F)-32;
+				fontAddr <= (((string>>8*charIdx)&'h7F)-32) * 6;
+			end else begin
+				idx <= idx + 1;
+				fontAddr <= char * 6 + idx + 1;
+			end
+		end
+	end else begin
+		if (CounterX==0 && CounterY==16)
+			scroll<=scroll+1;
+		idx <= 0;
+		charIdx <= scroll>>3;
+		char <= 0;
+		fontAddr <= 0;
+		red <= redneo;
+		green <= greenneo;
+		blue <= blueneo;
 	end
 end
 
