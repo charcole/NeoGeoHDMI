@@ -246,6 +246,22 @@ reg [2:0] idx;
 reg [3:0] charIdx;
 reg [6:0] char;
 reg [7:0] scroll;
+reg [6:0] logo;
+reg [7:0] ba;
+
+reg [15:0] dx;
+reg [15:0] dx2;
+reg [15:0] dy;
+reg [15:0] d;
+reg [15:0] dd;
+reg [15:0] dd2;
+reg [15:0] ax;
+
+reg [8:0] num [7:0];
+reg [8:0] den [7:0];
+reg [8:0] res [7:0];
+reg [9:0] s;
+reg [19:0] cc; 
 
 localparam [16*8:0] string = "+ Hello World! +";
 
@@ -258,39 +274,92 @@ begin
 	idx=0;
 	char=0;
 	scroll=0;
+	logo=0;
 end
 
 assign fontROMClock = pixclk;
 assign fontAddress = fontAddr;
 
+function [15:0] abs;
+	input [15:0] v;
+	begin
+		abs=($signed(v)<0)?-v:v;
+	end
+endfunction
+
 always @(posedge pixclk)
 begin
-	if (bOverlay && CounterY<16 && CounterX!=0) begin
-		red <= fontData[(CounterY>>1)&7]?0:0;
-		green <= fontData[(CounterY>>1)&7]?255:0;
-		blue <= fontData[(CounterY>>1)&7]?0:0;
-		if (CounterX&1) begin
-			if (idx==5 || ((char!=0 || idx>2) && fontData==0)) begin
-				idx <= 0;
-				charIdx <= charIdx - 1;
-				char <= ((string>>8*charIdx)&'h7F)-32;
-				fontAddr <= (((string>>8*charIdx)&'h7F)-32) * 6;
+	if (logo!=127) begin
+		dx<=(CounterX+9-`DISPLAY_WIDTH/2);
+		dx2<=(CounterX-`DISPLAY_WIDTH/2);
+		dy<=(CounterY-`DISPLAY_HEIGHT/2);
+		
+		dd<=(((`DISPLAY_WIDTH*`DISPLAY_WIDTH/8)-($signed(dx2)*$signed(dx2)+$signed(dy)*$signed(dy)))>>8)
+			-((logo<32)?8*(32-logo):0)+((logo>96)?32*(logo-96):0);
+		if (abs(dx)<abs(dy)) begin
+			num[0]<=abs(dx);
+			den[0]<=abs(dy);
+			s<=(s<<1)|(dx[15]^dy[15]);
+			cc<=(cc<<2)|(($signed(dy)>0)?3:1);
+		end else begin
+			num[0]<=abs(dy);
+			den[0]<=abs(dx);
+			s<=(s<<1)|(dx[15]^dy[15]^1);
+			cc<=(cc<<2)|(($signed(dx)<0)?2:0);
+		end
+		
+		if (num[0]>=den[0]) begin num[1]<=num[0]-den[0]; res[0]<=      +128; end else begin num[1]<=num[0]; res[0]<=0;      end den[1]<=den[0]>>1;
+		if (num[1]>=den[1]) begin num[2]<=num[1]-den[1]; res[1]<=res[0]+ 64; end else begin num[2]<=num[1]; res[1]<=res[0]; end den[2]<=den[1]>>1;
+		if (num[2]>=den[2]) begin num[3]<=num[2]-den[2]; res[2]<=res[1]+ 32; end else begin num[3]<=num[2]; res[2]<=res[1]; end den[3]<=den[2]>>1;
+		if (num[3]>=den[3]) begin num[4]<=num[3]-den[3]; res[3]<=res[2]+ 16; end else begin num[4]<=num[3]; res[3]<=res[2]; end den[4]<=den[3]>>1;
+		if (num[4]>=den[4]) begin num[5]<=num[4]-den[4]; res[4]<=res[3]+  8; end else begin num[5]<=num[4]; res[4]<=res[3]; end den[5]<=den[4]>>1;
+		if (num[5]>=den[5]) begin num[6]<=num[5]-den[5]; res[5]<=res[4]+  4; end else begin num[6]<=num[5]; res[5]<=res[4]; end den[6]<=den[5]>>1;
+		if (num[6]>=den[6]) begin num[7]<=num[6]-den[6]; res[6]<=res[5]+  2; end else begin num[7]<=num[6]; res[6]<=res[5]; end den[7]<=den[6]>>1;
+		if (num[7]>=den[7]) begin                        res[7]<=res[6]+  1; end else begin                 res[7]<=res[6]; end
+		ax<=(((s[9]?-res[7]:res[7])+(2*cc[19:18]+1)*128+logo*4)>>2)&'hFF;
+		
+		if (CounterX>=`DISPLAY_WIDTH/2-64 && CounterX<=`DISPLAY_WIDTH/2+64 && CounterY>=`DISPLAY_HEIGHT-16 && CounterY<`DISPLAY_HEIGHT-8) begin
+			fontAddr<=3*256+CounterX-(`DISPLAY_WIDTH/2-64);
+			if (CounterX>`DISPLAY_WIDTH/2-64+2 && logo>32)
+				ba<=fontData[CounterY-(`DISPLAY_HEIGHT-16)]?((logo<96)?(logo-32)>>1:32):0;
+			else
+				ba<=0;
+		end else begin
+			fontAddr<=(3*(255-ax))+((dd-128)>>5);
+			ba<=0;
+		end
+		dd2<=dd;
+		d<=dd2;
+		
+		if ($signed(d)>=256) begin
+			red <= redneo;
+			green <= greenneo;
+			blue <= blueneo;	
+		end else begin
+			if ($signed(d)>=0 && (d<128 || d>=224 || !fontData[(d>>2)&7])) begin
+				red<=(ba+d<255)?ba+d:255;
+				green<=(d*d)>>8;
+				blue<=0;		
 			end else begin
-				idx <= idx + 1;
-				fontAddr <= char * 6 + idx + 1;
+				red<=0;
+				green<=0;
+				blue<=0;
 			end
 		end
+		if (CounterX==0 && CounterY==0)
+			logo<=logo+1;
+	end else if (bOverlay && CounterY>=`DISPLAY_HEIGHT/2-8 && CounterY<`DISPLAY_HEIGHT/2+8) begin
+		red <= 0;
+		green <= fontData[(CounterY-(`DISPLAY_HEIGHT/2-8))>>1]?255:0;
+		blue <= 0;
+		fontAddr<=3*256+(((CounterX>>1)+scroll)&'hFF);
 	end else begin
-		if (CounterX==0 && CounterY==16)
-			scroll<=scroll+1;
-		idx <= 0;
-		charIdx <= scroll>>3;
-		char <= 0;
-		fontAddr <= 0;
 		red <= redneo;
 		green <= greenneo;
 		blue <= blueneo;
 	end
+	if (CounterX==0 && CounterY==0)
+		scroll<=scroll+1;
 end
 
 ////////////////////////////////////////////////////////////////////////
