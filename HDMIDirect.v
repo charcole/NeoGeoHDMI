@@ -4,10 +4,8 @@
 //   Added Neo Geo MVS input, scan doubling, HDMI data packets and audio
 //   Offers fake scanline generation (select via button)
 //		0: Line doubled but even lines are half brightness
-//		1: Line doubled but even lines are half brightness on even frames and vice versa
-//		2: Only show even lines (odd lines are black)
-//		3: Show even lines on even frames, odd lines on odd frames
-//		4: Line doubled
+//		1: Only show even lines (odd lines are black)
+//		2: Line doubled
 
 module HDMIDirectV(
 	input pixclk,
@@ -21,6 +19,7 @@ module HDMIDirectV(
 	input audioLR,
 	input audioClk,
 	input audioData,
+	input [7:0] fontData,
 	output [2:0] TMDSp, TMDSn,
 	output TMDSp_clock, TMDSn_clock,
 	output [11:0] videoaddressw,
@@ -30,7 +29,9 @@ module HDMIDirectV(
 	output videowrite,
 	output [11:0] videoaddressoutw,
 	output [16:0] videobusoutw,
-	output neogeoclk
+	output neogeoclk,
+	output [10:0] fontAddress,
+	output fontROMClock
 );
 
 ////////////////////////////////////////////////////////////////////////
@@ -101,20 +102,23 @@ assign neogeoclk=neoGeoClk;
 // Also takes care of centring the picture (using the sync input).
 ////////////////////////////////////////////////////////////////////////
 
-reg [7:0] red, green, blue;
+reg [7:0] redneo, greenneo, blueneo;
 reg [9:0] CounterX, CounterY;
 reg [9:0] NeoCounterX, NeoCounterY;
 reg [11:0] videoaddress;
 reg [11:0] videoaddressout;
 reg [16:0] videobusout;
-reg [2:0] scanlineType;
-reg hSync, vSync, DrawArea, frame;
+reg [1:0] scanlineType;
+reg [7:0] frames;
+reg [23:0] syncWait;
+reg bOverlay;
+reg hSync, vSync, DrawArea;
 
 initial
 begin
-	red=0;
-	green=0;
-	blue=0;
+	redneo=0;
+	greenneo=0;
+	blueneo=0;
 	CounterX=0;
 	CounterY=0;
 	videoaddress=0;
@@ -124,7 +128,9 @@ begin
 	hSync=0;
 	vSync=0;
 	DrawArea=0;
-	frame=0;
+	frames=0;
+	syncWait=0;
+	bOverlay=0;
 	
 	NeoCounterX=0;
 	NeoCounterY=0;
@@ -183,10 +189,20 @@ begin
 			// Sync screen output with NeoGeo output
 			// +2 means there's a line in the doubler ready
 			if (NeoCounterY==(`NEOGEO_FULL_HEIGHT-`CENTERING_Y+2) && NeoCounterX==0) begin
+				syncWait <= 0;
+				bOverlay <= 0;
 				CounterY <= 0;
 				CounterX <= 0;
-				if (scanlineType[0])
-					frame <= !frame;
+				if (frames!=8'hFF)
+					frames <= frames + 1;
+			end else if (syncWait==24'hFFFFFF) begin // If not synced within half a second then display error
+				bOverlay <= 1;
+				CounterY <= 0;
+				CounterX <= 0;
+				if (frames!=8'hFF)
+					frames <= frames + 1;
+			end else begin
+				syncWait <= syncWait + 1;
 			end
 		end else begin
 			CounterY <= CounterY+1;
@@ -198,25 +214,188 @@ begin
 	if (CounterX>=`CENTERING_X && CounterX<`DISPLAY_WIDTH+`CENTERING_X) begin
 		if ((CounterX-`CENTERING_X)<`NEOGEO_DISPLAY_WIDTH) begin
 			videoaddress<=(CounterY[2:1]*`NEOGEO_DISPLAY_WIDTH) + (CounterX-`CENTERING_X);
-			if (CounterY[0]==frame || scanlineType==4) begin
-				red <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
-				green <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
-				blue <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
+			if (scanlineType==2 || !(CounterY&1)) begin
+				redneo <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
+				greenneo <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
+				blueneo <= ((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0);
 			end else begin
-				if (!scanlineType[1]) begin
-					red <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
-					green <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
-					blue <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
+				if (!scanlineType[0]) begin
+					redneo <= (((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0)) >> 1;
+					greenneo <= (((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0)) >> 1;
+					blueneo <= (((videobus[14:10]<<1)|videobus[15])*3 + (videobus[16]?((videobus[14:10]<<1)|videobus[15]):0)) >> 1;
 				end else begin
-					red <= 0;
-					green <= 0;
-					blue <= 0;
+					redneo <= 0;
+					greenneo <= 0;
+					blueneo <= 0;
 				end
 			end
 		end else begin
-			red <= 0;
+			redneo <= 0;
+			greenneo <= 0;
+			blueneo <= 0;			
+		end
+	end
+end
+
+////////////////////////////////////////////////////////////////////////
+// Error overlay
+////////////////////////////////////////////////////////////////////////
+
+reg [7:0] red, green, blue;
+reg [10:0] fontAddr;
+reg [7:0] scroll;
+reg [6:0] logo;
+reg [7:0] ba;
+reg [9:0] dx;
+reg [9:0] dx2;
+reg [9:0] dy;
+reg [15:0] d;
+reg [15:0] dd;
+reg [15:0] dd2;
+reg [7:0] ax;
+reg [8:0] num [7:0];
+reg [8:0] den [7:0];
+reg [8:0] res [7:0];
+reg [9:0] s;
+reg [19:0] cc; 
+reg [1:0] lastScanlineType;
+reg [7:0] scanlineChanged;
+reg shadow;
+
+initial
+begin
+	red=0;
+	green=0;
+	blue=0;
+	fontAddr=0;
+	scroll=0;
+	logo=0;
+	s=0;
+	cc=0;
+	lastScanlineType=0;
+	scanlineChanged=0;
+	shadow=0;
+end
+
+assign fontROMClock = pixclk;
+assign fontAddress = fontAddr;
+
+function [9:0] abs;
+	input [9:0] v;
+	begin
+		abs=($signed(v)<0)?-v:v;
+	end
+endfunction
+
+always @(posedge pixclk)
+begin
+	if (logo!=127) begin
+		// Splash screen rendering
+		dx<=(CounterX+9-`DISPLAY_WIDTH/2);	// divide is latent so look ahead
+		dx2<=(CounterX-`DISPLAY_WIDTH/2);
+		dy<=(CounterY-`DISPLAY_HEIGHT/2);
+		// Calulate distance from centre
+		dd<=(((`DISPLAY_WIDTH*`DISPLAY_WIDTH/8)-($signed(dx2)*$signed(dx2)+$signed(dy)*$signed(dy)))>>8)
+			-((logo<32)?8*(32-logo):0)+((logo>96)?32*(logo-96):0);
+		// atan approximation
+		if (abs(dx)<abs(dy)) begin
+			num[0]<=abs(dx);
+			den[0]<=abs(dy);
+			s<=(s<<1)|(dx[9]^dy[9]);
+			cc<=(cc<<2)|(($signed(dy)>0)?3:1);
+		end else begin
+			num[0]<=abs(dy);
+			den[0]<=abs(dx);
+			s<=(s<<1)|(dx[9]^dy[9]^1);
+			cc<=(cc<<2)|(($signed(dx)<0)?2:0);
+		end
+		// 8 cycle latency divide
+		if (num[0]>=den[0]) begin num[1]<=num[0]-den[0]; res[0]<=      +128; end else begin num[1]<=num[0]; res[0]<=0;      end den[1]<=den[0]>>1;
+		if (num[1]>=den[1]) begin num[2]<=num[1]-den[1]; res[1]<=res[0]+ 64; end else begin num[2]<=num[1]; res[1]<=res[0]; end den[2]<=den[1]>>1;
+		if (num[2]>=den[2]) begin num[3]<=num[2]-den[2]; res[2]<=res[1]+ 32; end else begin num[3]<=num[2]; res[2]<=res[1]; end den[3]<=den[2]>>1;
+		if (num[3]>=den[3]) begin num[4]<=num[3]-den[3]; res[3]<=res[2]+ 16; end else begin num[4]<=num[3]; res[3]<=res[2]; end den[4]<=den[3]>>1;
+		if (num[4]>=den[4]) begin num[5]<=num[4]-den[4]; res[4]<=res[3]+  8; end else begin num[5]<=num[4]; res[4]<=res[3]; end den[5]<=den[4]>>1;
+		if (num[5]>=den[5]) begin num[6]<=num[5]-den[5]; res[5]<=res[4]+  4; end else begin num[6]<=num[5]; res[5]<=res[4]; end den[6]<=den[5]>>1;
+		if (num[6]>=den[6]) begin num[7]<=num[6]-den[6]; res[6]<=res[5]+  2; end else begin num[7]<=num[6]; res[6]<=res[5]; end den[7]<=den[6]>>1;
+		if (num[7]>=den[7]) begin                        res[7]<=res[6]+  1; end else begin                 res[7]<=res[6]; end
+		ax<=(((s[9]?-res[7]:res[7])+(2*cc[19:18]+1)*128+logo*4)>>2)&'hFF;
+		// Look up texture maps
+		if (CounterX>=`DISPLAY_WIDTH/2-64 && CounterX<=`DISPLAY_WIDTH/2+64 && CounterY>=`DISPLAY_HEIGHT-16 && CounterY<`DISPLAY_HEIGHT-8) begin
+			// Display the link
+			fontAddr<=3*256+CounterX-(`DISPLAY_WIDTH/2-64);
+			if (CounterX>`DISPLAY_WIDTH/2-64+2 && logo>32)
+				ba<=fontData[CounterY-(`DISPLAY_HEIGHT-16)]?((logo<96)?(logo-32)>>1:32):0;
+			else
+				ba<=0;
+		end else begin
+			// Logo
+			fontAddr<=(3*(255-ax))+((dd-128)>>5);
+			ba<=0;
+		end
+		dd2<=dd;
+		d<=dd2;
+		// Output
+		if ($signed(d)>=256) begin
+			red <= redneo;
+			green <= greenneo;
+			blue <= blueneo;	
+		end else begin
+			if (CounterX>3 && $signed(d)>=0 && (d<128 || d>=224 || !fontData[(d>>2)&7])) begin
+				red<=(ba+d<255)?ba+d:255;
+				green<=(d*d)>>8;
+				blue<=0;		
+			end else begin
+				red<=0;
+				green<=0;
+				blue<=0;
+			end
+		end
+		if (frames==8'hFF && CounterX==0 && CounterY==0)
+			logo<=logo+1;
+	end else if (bOverlay && CounterY>=`DISPLAY_HEIGHT/2-8 && CounterY<`DISPLAY_HEIGHT/2+8) begin
+		// Scrolling error message
+		red <= 0;
+		fontAddr<=3*256+(((CounterX>>1)+scroll)&'hFF);
+		if (CounterX>3)
+			green <= fontData[(CounterY-(`DISPLAY_HEIGHT/2-8))>>1]?255:0;
+		else
 			green <= 0;
-			blue <= 0;			
+		blue <= 0;
+	end else if (scanlineChanged>0 && CounterX>=`DISPLAY_WIDTH-154 && CounterY>=`DISPLAY_HEIGHT-16) begin
+		// Display scanline mode
+		fontAddr<=(4*256)+(scanlineType*75)+((CounterX-(`DISPLAY_WIDTH-154))>>1);
+		shadow<=fontData[(CounterY-(`DISPLAY_HEIGHT-16))>>1];
+		if (CounterX>=`DISPLAY_WIDTH-150 && fontData[(CounterY-(`DISPLAY_HEIGHT-16))>>1]|shadow) begin
+			if (shadow) begin
+				if (scanlineType==2 || !(CounterY&1))
+					green <= 255;
+				else if (scanlineType==0)
+					green <= 127;
+				else
+					green <= 0;
+			end else begin
+				green <=0;
+			end
+			red<=0;
+			blue<=0;
+		end else begin
+			red <= redneo;
+			green <= greenneo;
+			blue <= blueneo;
+		end
+	end else begin
+		// normal output
+		red <= redneo;
+		green <= greenneo;
+		blue <= blueneo;
+	end
+	if (CounterX==0 && CounterY==0) begin
+		scroll<=scroll+1;
+		if (scanlineChanged>0)
+			scanlineChanged <= scanlineChanged - 1;
+		if (scanlineType!=lastScanlineType) begin
+			lastScanlineType <= scanlineType;
+			scanlineChanged <= 60;
 		end
 	end
 end
@@ -600,11 +779,11 @@ begin
 	buttonDebounce=0;
 end
 
-always @(posedge audioClk)
+always @(posedge pixclk)
 begin
 	if (!button) begin
 		if (buttonDebounce=='h1ffff)
-			scanlineType<=scanlineType!=4?scanlineType+1:0;
+			scanlineType<=scanlineType!=2?scanlineType+1:0;
 		buttonDebounce<=0;
 	end else if (buttonDebounce!='h1ffff) begin	// Audio clock is 6MHz so this is about 22ms
 		buttonDebounce<=buttonDebounce+1;

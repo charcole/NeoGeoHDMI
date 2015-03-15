@@ -20,9 +20,9 @@ applicable agreement for further details.
 */
 (header "symbol" (version "1.1"))
 (symbol
-	(rect 16 16 272 288)
+	(rect 16 16 272 320)
 	(text "HDMIDirectV" (rect 5 0 61 12)(font "Arial" ))
-	(text "inst" (rect 8 256 20 268)(font "Arial" ))
+	(text "inst" (rect 8 288 20 300)(font "Arial" ))
 	(port
 		(pt 0 32)
 		(input)
@@ -122,6 +122,13 @@ applicable agreement for further details.
 		(line (pt 0 240)(pt 16 240)(line_width 1))
 	)
 	(port
+		(pt 0 256)
+		(input)
+		(text "fontData[7..0]" (rect 0 0 54 12)(font "Arial" ))
+		(text "fontData[7..0]" (rect 21 251 75 263)(font "Arial" ))
+		(line (pt 0 256)(pt 16 256)(line_width 3))
+	)
+	(port
 		(pt 256 32)
 		(output)
 		(text "TMDSp[2..0]" (rect 0 0 51 12)(font "Arial" ))
@@ -205,7 +212,21 @@ applicable agreement for further details.
 		(text "neogeoclk" (rect 197 203 235 215)(font "Arial" ))
 		(line (pt 256 208)(pt 240 208)(line_width 1))
 	)
+	(port
+		(pt 256 224)
+		(output)
+		(text "fontAddress[10..0]" (rect 0 0 74 12)(font "Arial" ))
+		(text "fontAddress[10..0]" (rect 161 219 235 231)(font "Arial" ))
+		(line (pt 256 224)(pt 240 224)(line_width 3))
+	)
+	(port
+		(pt 256 240)
+		(output)
+		(text "fontROMClock" (rect 0 0 61 12)(font "Arial" ))
+		(text "fontROMClock" (rect 174 235 235 247)(font "Arial" ))
+		(line (pt 256 240)(pt 240 240)(line_width 1))
+	)
 	(drawing
-		(rectangle (rect 16 16 240 256)(line_width 1))
+		(rectangle (rect 16 16 240 288)(line_width 1))
 	)
 )
