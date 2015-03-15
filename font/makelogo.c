@@ -14,7 +14,7 @@
 
 #define CHAR_WIDTH 3
 
-unsigned char data[CHAR_WIDTH*256+256];
+unsigned char data[CHAR_WIDTH*256+512];
 
 void fontCreate()
 {
@@ -37,10 +37,12 @@ void fontCreate()
 		int k;
 		for (k=0; k<8; k++)
 		{
-			data[c]|=mheader_data[k*width+x]<<k;
+			data[c]|=mheader_data[k*mwidth+x]<<k;
 		}
 		c++;
 	}
+	if (c!=sizeof(data))
+		printf("Wrote wrong size\n");
 }
 
 int main()
@@ -49,24 +51,21 @@ int main()
 	int address=0;
 	int i, k;
 	fontCreate();
-	for (i=0; i<256; i++)
+	for (i=0; i<sizeof(data); i++)
 	{
 		int checksum=0;
-		fprintf(f, ":%02d%04X00", 4, address);
-		checksum+=4;
+		int o=data[i]&0xFF;
+		fprintf(f, ":%02d%04X00", 1, address);
+		checksum+=1;
 		checksum+=(address/256);
 		checksum+=address&0xFF;
-		//address++;
-		for (k=0; k<4; k++)
-		{
-			int o=data[i*4+k];
-			fprintf(f, "%02X", o);
-			checksum+=o;
-			address++;
-		}
+		fprintf(f, "%02X", o);
+		checksum+=o;
+		address++;
 		fprintf(f, "%02X\n", (-checksum)&0xFF);
-		checksum=0;
 	}
+	if (address!=sizeof(data))
+		printf("Wrote wrong size output\n");
 	fprintf(f, ":00000001FF\n");
 	fclose(f);
 	return 0;

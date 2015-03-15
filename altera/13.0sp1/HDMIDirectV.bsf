@@ -215,8 +215,8 @@ applicable agreement for further details.
 	(port
 		(pt 256 224)
 		(output)
-		(text "fontAddress[9..0]" (rect 0 0 70 12)(font "Arial" ))
-		(text "fontAddress[9..0]" (rect 165 219 235 231)(font "Arial" ))
+		(text "fontAddress[10..0]" (rect 0 0 74 12)(font "Arial" ))
+		(text "fontAddress[10..0]" (rect 161 219 235 231)(font "Arial" ))
 		(line (pt 256 224)(pt 240 224)(line_width 3))
 	)
 	(port
