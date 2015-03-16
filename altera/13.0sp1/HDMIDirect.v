@@ -434,11 +434,11 @@ end
 `ifdef YM3016
 always @(negedge audioClk)
 begin
-	audioInput[0]<=(audioInput[0]>>1)|(audioData<<14);
-	audioInput[1]<=(audioInput[1]>>1)|(audioData<<14);
+	audioInput[0]<=(audioInput[0]>>1)|(audioData<<15);
+	audioInput[1]<=(audioInput[1]>>1)|(audioData<<15);
 end
-always @(negedge audioLR)  begin curSampleL<=audioInput[0]; end
-always @(negedge audioLR2) begin curSampleR<=audioInput[1]; end
+always @(negedge audioLR)  begin curSampleL<=audioInput[0]-16'h8000; end
+always @(negedge audioLR2) begin curSampleR<=audioInput[1]-16'h8000; end
 `else // BU9480F
 always @(posedge audioClk) if (audioLR) audioInput[0]<=(audioInput[0]<<1)|audioData; else audioInput[1]<=(audioInput[1]<<1)|audioData;
 always @(negedge audioLR) begin curSampleL<=audioInput[0]; curSampleR<=audioInput[1]; end
