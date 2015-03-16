@@ -207,6 +207,23 @@ applicable agreement for further details.
 	(annotation_block (location)(rect -344 120 -288 136))
 )
 (pin
+	(input)
+	(rect 0 488 168 504)
+	(text "INPUT" (rect 125 0 154 10)(font "Arial" (font_size 6)))
+	(text "audioLR2" (rect 5 0 54 11)(font "Arial" ))
+	(pt 168 8)
+	(drawing
+		(line (pt 84 12)(pt 109 12))
+		(line (pt 84 4)(pt 109 4))
+		(line (pt 113 8)(pt 168 8))
+		(line (pt 84 12)(pt 84 4))
+		(line (pt 109 4)(pt 113 8))
+		(line (pt 109 12)(pt 113 8))
+	)
+	(text "VCC" (rect 128 7 149 17)(font "Arial" (font_size 6)))
+	(annotation_block (location)(rect -56 504 0 520))
+)
+(pin
 	(output)
 	(rect 616 136 792 152)
 	(text "OUTPUT" (rect 1 0 41 10)(font "Arial" (font_size 6)))
@@ -574,6 +591,88 @@ applicable agreement for further details.
 	)
 )
 (symbol
+	(rect 408 464 520 560)
+	(text "LPM_ROM" (rect 25 0 104 16)(font "Arial" (font_size 10)))
+	(text "inst1" (rect 3 85 27 96)(font "Arial" ))
+	(port
+		(pt 0 24)
+		(input)
+		(text "address[LPM_WIDTHAD-1..0]" (rect 20 17 189 30)(font "Arial" (font_size 8)))
+		(text "address[]" (rect 20 17 73 30)(font "Arial" (font_size 8)))
+		(line (pt 0 24)(pt 16 24)(line_width 3))
+	)
+	(port
+		(pt 0 40)
+		(input)
+		(text "inclock" (rect 20 33 61 46)(font "Arial" (font_size 8)))
+		(text "inclock" (rect 20 33 61 46)(font "Arial" (font_size 8)))
+		(line (pt 0 40)(pt 16 40))
+	)
+	(port
+		(pt 0 72)
+		(input)
+		(text "memenab" (rect 20 65 77 78)(font "Arial" (font_size 8)))
+		(text "memenab" (rect 20 65 77 78)(font "Arial" (font_size 8)))
+		(line (pt 0 72)(pt 16 72))
+	)
+	(port
+		(pt 0 56)
+		(input)
+		(text "outclock" (rect 20 49 69 62)(font "Arial" (font_size 8)))
+		(text "outclock" (rect 20 49 69 62)(font "Arial" (font_size 8)))
+		(line (pt 0 56)(pt 16 56))
+		(unused)
+	)
+	(port
+		(pt 112 48)
+		(output)
+		(text "q[LPM_WIDTH-1..0]" (rect 80 41 194 54)(font "Arial" (font_size 8)))
+		(text "q[]" (rect 79 41 94 54)(font "Arial" (font_size 8)))
+		(line (pt 96 48)(pt 112 48)(line_width 3))
+	)
+	(parameter
+		"LPM_ADDRESS_CONTROL"
+		"\"REGISTERED\""
+		"Should the address and control ports be registered?"
+		"\"REGISTERED\"" "\"UNREGISTERED\"" 
+	)
+	(parameter
+		"LPM_FILE"
+		"\"font/logo.hex\""
+		"File containing initial contents of memory array"
+	)
+	(parameter
+		"LPM_NUMWORDS"
+		""
+		"Number of memory words, default is 2^LPM_WIDTHAD"
+	)
+	(parameter
+		"LPM_OUTDATA"
+		"\"UNREGISTERED\""
+		"Should the output data be registered?"
+		"\"REGISTERED\"" "\"UNREGISTERED\"" 
+	)
+	(parameter
+		"LPM_WIDTH"
+		"8"
+		"Data width in bits, any integer > 0"
+		" 1" " 2" " 3" " 4" " 5" " 6" " 7" " 8" " 9" "10" "11" "12" "13" "14" "15" "16" "20" "24" "28" "32" "40" "48" "56" "64" 
+	)
+	(parameter
+		"LPM_WIDTHAD"
+		"11"
+		"Number of address lines, any integer > 0"
+		" 1" " 2" " 3" " 4" " 5" " 6" " 7" " 8" " 9" "10" "11" "12" 
+	)
+	(drawing
+		(line (pt 16 16)(pt 96 16))
+		(line (pt 16 80)(pt 96 80))
+		(line (pt 96 80)(pt 96 16))
+		(line (pt 16 80)(pt 16 16))
+	)
+	(annotation_block (parameter)(rect 560 472 835 563))
+)
+(symbol
 	(rect 336 80 592 384)
 	(text "HDMIDirectV" (rect 5 0 72 11)(font "Arial" ))
 	(text "inst" (rect 8 288 26 299)(font "Arial" ))
@@ -678,9 +777,16 @@ applicable agreement for further details.
 	(port
 		(pt 0 256)
 		(input)
+		(text "audioLR2" (rect 0 0 48 11)(font "Arial" ))
+		(text "audioLR2" (rect 21 251 69 262)(font "Arial" ))
+		(line (pt 0 256)(pt 16 256))
+	)
+	(port
+		(pt 0 272)
+		(input)
 		(text "fontData[7..0]" (rect 0 0 66 11)(font "Arial" ))
-		(text "fontData[7..0]" (rect 21 251 87 262)(font "Arial" ))
-		(line (pt 0 256)(pt 16 256)(line_width 3))
+		(text "fontData[7..0]" (rect 21 267 87 278)(font "Arial" ))
+		(line (pt 0 272)(pt 16 272)(line_width 3))
 	)
 	(port
 		(pt 256 32)
@@ -783,88 +889,6 @@ applicable agreement for further details.
 	(drawing
 		(rectangle (rect 16 16 240 288))
 	)
-)
-(symbol
-	(rect 408 464 520 560)
-	(text "LPM_ROM" (rect 25 0 104 16)(font "Arial" (font_size 10)))
-	(text "inst1" (rect 3 85 27 96)(font "Arial" ))
-	(port
-		(pt 0 24)
-		(input)
-		(text "address[LPM_WIDTHAD-1..0]" (rect 20 17 189 30)(font "Arial" (font_size 8)))
-		(text "address[]" (rect 20 17 73 30)(font "Arial" (font_size 8)))
-		(line (pt 0 24)(pt 16 24)(line_width 3))
-	)
-	(port
-		(pt 0 40)
-		(input)
-		(text "inclock" (rect 20 33 61 46)(font "Arial" (font_size 8)))
-		(text "inclock" (rect 20 33 61 46)(font "Arial" (font_size 8)))
-		(line (pt 0 40)(pt 16 40))
-	)
-	(port
-		(pt 0 72)
-		(input)
-		(text "memenab" (rect 20 65 77 78)(font "Arial" (font_size 8)))
-		(text "memenab" (rect 20 65 77 78)(font "Arial" (font_size 8)))
-		(line (pt 0 72)(pt 16 72))
-	)
-	(port
-		(pt 0 56)
-		(input)
-		(text "outclock" (rect 20 49 69 62)(font "Arial" (font_size 8)))
-		(text "outclock" (rect 20 49 69 62)(font "Arial" (font_size 8)))
-		(line (pt 0 56)(pt 16 56))
-		(unused)
-	)
-	(port
-		(pt 112 48)
-		(output)
-		(text "q[LPM_WIDTH-1..0]" (rect 80 41 194 54)(font "Arial" (font_size 8)))
-		(text "q[]" (rect 79 41 94 54)(font "Arial" (font_size 8)))
-		(line (pt 96 48)(pt 112 48)(line_width 3))
-	)
-	(parameter
-		"LPM_ADDRESS_CONTROL"
-		"\"REGISTERED\""
-		"Should the address and control ports be registered?"
-		"\"REGISTERED\"" "\"UNREGISTERED\"" 
-	)
-	(parameter
-		"LPM_FILE"
-		"\"font/logo.hex\""
-		"File containing initial contents of memory array"
-	)
-	(parameter
-		"LPM_NUMWORDS"
-		""
-		"Number of memory words, default is 2^LPM_WIDTHAD"
-	)
-	(parameter
-		"LPM_OUTDATA"
-		"\"UNREGISTERED\""
-		"Should the output data be registered?"
-		"\"REGISTERED\"" "\"UNREGISTERED\"" 
-	)
-	(parameter
-		"LPM_WIDTH"
-		"8"
-		"Data width in bits, any integer > 0"
-		" 1" " 2" " 3" " 4" " 5" " 6" " 7" " 8" " 9" "10" "11" "12" "13" "14" "15" "16" "20" "24" "28" "32" "40" "48" "56" "64" 
-	)
-	(parameter
-		"LPM_WIDTHAD"
-		"11"
-		"Number of address lines, any integer > 0"
-		" 1" " 2" " 3" " 4" " 5" " 6" " 7" " 8" " 9" "10" "11" "12" 
-	)
-	(drawing
-		(line (pt 16 16)(pt 96 16))
-		(line (pt 16 80)(pt 96 80))
-		(line (pt 96 80)(pt 96 16))
-		(line (pt 16 80)(pt 16 16))
-	)
-	(annotation_block (parameter)(rect 560 472 835 563))
 )
 (connector
 	(pt 592 112)
@@ -1040,11 +1064,6 @@ applicable agreement for further details.
 	(pt -80 112)
 )
 (connector
-	(pt 304 336)
-	(pt 336 336)
-	(bus)
-)
-(connector
 	(pt 248 408)
 	(pt 880 408)
 	(bus)
@@ -1194,11 +1213,6 @@ applicable agreement for further details.
 	(pt 608 320)
 )
 (connector
-	(pt 304 336)
-	(pt 304 424)
-	(bus)
-)
-(connector
 	(pt 624 304)
 	(pt 624 440)
 	(bus)
@@ -1248,6 +1262,28 @@ applicable agreement for further details.
 (connector
 	(pt 368 456)
 	(pt 368 504)
+)
+(connector
+	(pt 304 424)
+	(pt 304 352)
+	(bus)
+)
+(connector
+	(pt 336 352)
+	(pt 304 352)
+	(bus)
+)
+(connector
+	(pt 168 496)
+	(pt 280 496)
+)
+(connector
+	(pt 280 496)
+	(pt 280 336)
+)
+(connector
+	(pt 280 336)
+	(pt 336 336)
 )
 (junction (pt 688 240))
 (junction (pt 688 280))

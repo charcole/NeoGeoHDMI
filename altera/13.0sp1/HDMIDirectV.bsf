@@ -124,9 +124,16 @@ applicable agreement for further details.
 	(port
 		(pt 0 256)
 		(input)
+		(text "audioLR2" (rect 0 0 38 12)(font "Arial" ))
+		(text "audioLR2" (rect 21 251 59 263)(font "Arial" ))
+		(line (pt 0 256)(pt 16 256)(line_width 1))
+	)
+	(port
+		(pt 0 272)
+		(input)
 		(text "fontData[7..0]" (rect 0 0 54 12)(font "Arial" ))
-		(text "fontData[7..0]" (rect 21 251 75 263)(font "Arial" ))
-		(line (pt 0 256)(pt 16 256)(line_width 3))
+		(text "fontData[7..0]" (rect 21 267 75 279)(font "Arial" ))
+		(line (pt 0 272)(pt 16 272)(line_width 3))
 	)
 	(port
 		(pt 256 32)

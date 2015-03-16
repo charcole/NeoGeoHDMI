@@ -19,6 +19,7 @@ module HDMIDirectV(
 	input audioLR,
 	input audioClk,
 	input audioData,
+	input audioLR2,
 	input [7:0] fontData,
 	output [2:0] TMDSp, TMDSn,
 	output TMDSp_clock, TMDSn_clock,
@@ -33,6 +34,14 @@ module HDMIDirectV(
 	output [10:0] fontAddress,
 	output fontROMClock
 );
+
+////////////////////////////////////////////////////////////////////////
+// User configuration defines
+
+`define YM3016		// Comment out for BU9480F (chip found on newer boards)
+`define SPLASH_SCREEN
+`define BAD_SYNC_DETECT
+`define DELAY_UNTIL_SPLASH_SCREEN	240	// In frames (/60 for seconds)
 
 ////////////////////////////////////////////////////////////////////////
 
@@ -109,7 +118,7 @@ reg [11:0] videoaddress;
 reg [11:0] videoaddressout;
 reg [16:0] videobusout;
 reg [1:0] scanlineType;
-reg [7:0] frames;
+reg [8:0] frames;
 reg [23:0] syncWait;
 reg bOverlay;
 reg hSync, vSync, DrawArea;
@@ -193,17 +202,20 @@ begin
 				bOverlay <= 0;
 				CounterY <= 0;
 				CounterX <= 0;
-				if (frames!=8'hFF)
+				if (frames!=`DELAY_UNTIL_SPLASH_SCREEN)
 					frames <= frames + 1;
-			end else if (syncWait==24'hFFFFFF) begin // If not synced within half a second then display error
+			end
+`ifdef BAD_SYNC_DETECT
+			else if (syncWait==24'hFFFFFF) begin // If not synced within half a second then display error
 				bOverlay <= 1;
 				CounterY <= 0;
 				CounterX <= 0;
-				if (frames!=8'hFF)
+				if (frames!=`DELAY_UNTIL_SPLASH_SCREEN)
 					frames <= frames + 1;
 			end else begin
 				syncWait <= syncWait + 1;
 			end
+`endif
 		end else begin
 			CounterY <= CounterY+1;
 			CounterX <= 0;
@@ -289,6 +301,7 @@ endfunction
 
 always @(posedge pixclk)
 begin
+`ifdef SPLASH_SCREEN
 	if (logo!=127) begin
 		// Splash screen rendering
 		dx<=(CounterX+9-`DISPLAY_WIDTH/2);	// divide is latent so look ahead
@@ -350,9 +363,11 @@ begin
 				blue<=0;
 			end
 		end
-		if (frames==8'hFF && CounterX==0 && CounterY==0)
+		if (frames==`DELAY_UNTIL_SPLASH_SCREEN && CounterX==0 && CounterY==0)
 			logo<=logo+1;
-	end else if (bOverlay && CounterY>=`DISPLAY_HEIGHT/2-8 && CounterY<`DISPLAY_HEIGHT/2+8) begin
+	end else
+`endif
+	if (bOverlay && CounterY>=`DISPLAY_HEIGHT/2-8 && CounterY<`DISPLAY_HEIGHT/2+8) begin
 		// Scrolling error message
 		red <= 0;
 		fontAddr<=3*256+(((CounterX>>1)+scroll)&'hFF);
@@ -416,8 +431,18 @@ begin
 	curSampleR=0;
 end
 
+`ifdef YM3016
+always @(negedge audioClk)
+begin
+	audioInput[0]<=(audioInput[0]>>1)|(audioData<<14);
+	audioInput[1]<=(audioInput[1]>>1)|(audioData<<14);
+end
+always @(negedge audioLR)  begin curSampleL<=audioInput[0]; end
+always @(negedge audioLR2) begin curSampleR<=audioInput[1]; end
+`else // BU9480F
 always @(posedge audioClk) if (audioLR) audioInput[0]<=(audioInput[0]<<1)|audioData; else audioInput[1]<=(audioInput[1]<<1)|audioData;
 always @(negedge audioLR) begin curSampleL<=audioInput[0]; curSampleR<=audioInput[1]; end
+`endif
 
 ////////////////////////////////////////////////////////////////////////
 // HDMI audio packet generator
