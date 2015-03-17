@@ -62,7 +62,7 @@ If you are doing this on an older Neo Geo with a YM3016 audio DAC then you need 
 | FPGA                         |  YM3016                                                                           |
 | ---------------------------- |  -------------------------------------------------------------------------------- |
 | ```Pin 114   audioLR   ```   |    ```Pin 8    SMP1                                                           ``` |
-| ```Pin 116   audioLR2  ```   |    ```Pin 7    SMP2                                                           ``` |
+| ```Pin 112   audioLR2  ```   |    ```Pin 7    SMP2                                                           ``` |
 | ```Pin 120   audioClk  ```   |    ```Pin 5    CLOCK                                                          ``` |
 | ```Pin 118   audioData ```   |    ```Pin 4    SD                                                             ``` |
 
