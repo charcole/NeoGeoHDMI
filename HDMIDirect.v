@@ -239,9 +239,9 @@ begin
 	end else begin
 		CounterX<=CounterX+1;
 	end
+	videoaddress<=(CounterY[2:1]*`NEOGEO_DISPLAY_WIDTH) + (CounterX+2-`CENTERING_X); // Look ahead two pixels
 	if (CounterX>=`CENTERING_X && CounterX<`DISPLAY_WIDTH+`CENTERING_X) begin
 		if ((CounterX-`CENTERING_X)<`NEOGEO_DISPLAY_WIDTH) begin
-			videoaddress<=(CounterY[2:1]*`NEOGEO_DISPLAY_WIDTH) + (CounterX-`CENTERING_X);
 			if (scanlineType==2 || !(CounterY&1)) begin
 				redneo <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
 				greenneo <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);
