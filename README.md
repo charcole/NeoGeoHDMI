@@ -1,6 +1,8 @@
 HDMI output for NeoGeo MVS
 ==========================
 
+*This branch isn't ready for the prime time yet. My MV1-FS works with this code but only up to 75% of full speed)*
+
 Summary: The digital video and audio outputs from the Neo Geo MVS are tapped off before going through the DACs. Instead an FPGA reads the data and outputs the signal over HDMI forming a direct digital to digital connection.
 
 This video should explain things:
