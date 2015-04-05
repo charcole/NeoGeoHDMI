@@ -73,7 +73,7 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to hdmip[2]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to hdmip[0]
 set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to hdmip[1]
 set_location_assignment PIN_75 -to R[0]
-set_location_assignment PIN_73 -to B[0]
+set_location_assignment PIN_104 -to B[0]
 set_location_assignment PIN_74 -to G[0]
 set_location_assignment PIN_79 -to DAK
 set_location_assignment PIN_101 -to G[1]

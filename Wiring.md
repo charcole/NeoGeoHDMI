@@ -45,7 +45,7 @@ Neo Geo to FPGA
 | ```Pin 86    G[2]      ```   |    ```IC6  Pin 15   Green[2] (Found 1Kohm to green JAMMA output)              ``` |
 | ```Pin 89    G[3]      ```   |    ```IC6  Pin 16   Green[3] (Found 470ohm to green JAMMA output)             ``` |
 | ```Pin 91    G[4]      ```   |    ```IC6  Pin 19   Green[4] (Found 220ohm to green JAMMA output)             ``` |
-| ```Pin 73    B[0]      ```   |    ```IC7  Pin 12   Blue[0] (Found 3.9Kohm to blue JAMMA output)              ``` |
+| ```Pin 104   B[0]      ```   |    ```IC7  Pin 12   Blue[0] (Found 3.9Kohm to blue JAMMA output)              ``` |
 | ```Pin 97    B[1]      ```   |    ```IC6  Pin 2    Blue[1] (Found 2.2Kohm to blue JAMMA output)              ``` |
 | ```Pin 96    B[2]      ```   |    ```IC6  Pin 5    Blue[2] (Found 1Kohm to blue JAMMA output)                ``` |
 | ```Pin 94    B[3]      ```   |    ```IC6  Pin 6    Blue[3] (Found 470ohm to blue JAMMA output)               ``` |
@@ -66,6 +66,32 @@ If you are doing this on an older Neo Geo with a YM3016 audio DAC then you need 
 | ```Pin 120   audioClk  ```   |    ```Pin 5    CLOCK                                                          ``` |
 | ```Pin 118   audioData ```   |    ```Pin 4    SD                                                             ``` |
 
+IC |Pin |Value
+---|----|-----
+1  |2	|R150
+1  |4	|G150
+1  |6	|B150
+1  |8	|B8K3
+1  |10	|G8K3
+1  |12	|R8K3
+1  |13  |!R8K3	Pin 99
+2  |1	|!CLR	Pin 103
+2  |2	|B3K8	Pin 104
+2  |5	|B2K2	Pin 97
+2  |6	|B1K0	Pin 96
+2  |9	|B470	Pin 94
+2  |12	|B220	Pin 93
+2  |15	|G3K8	Pin 74
+2  |16	|G2K2	Pin 101
+2  |19	|G1K0	Pin 86
+3  |2	|G480	Pin 89
+3  |5	|G220	Pin 91
+3  |6	|R3K8	Pin 75
+3  |9	|R2K2	Pin 92
+3  |12	|R1K0	Pin 90
+3  |15	|R470	Pin 87
+3  |16	|R220	Pin 100
+3  |19	|DAK	Pin 79
 
 *All lines go through 500Ohm/1KOhm resistor voltage dividers to get from 5V input to 3.3V output. Except NEOGEOCLK which is the only output from the FPGA and drives OSC input directly.*
 

@@ -38,6 +38,7 @@ module HDMIDirectV(
 ////////////////////////////////////////////////////////////////////////
 // User configuration defines
 
+`define OLD_SYNC	// Comment out if have NeoGeo that clears at end of line
 `define YM3016		// Comment out for BU9480F (chip found on newer boards)
 `define SPLASH_SCREEN
 `define BAD_SYNC_DETECT
@@ -59,7 +60,11 @@ module HDMIDirectV(
 `define NEOGEO_DISPLAY_HEIGHT	448
 `define NEOGEO_FULL_WIDTH		768
 `define NEOGEO_FULL_HEIGHT		528
-`define NEOGEO_VSYNC_LENGTH	80
+`ifdef OLD_SYNC
+	`define NEOGEO_VSYNC_LENGTH	81
+`else
+	`define NEOGEO_VSYNC_LENGTH	80
+`endif
 
 `define CENTERING_X				((`DISPLAY_WIDTH-`NEOGEO_DISPLAY_WIDTH)/2)	// For centering NeoGeo's 4:3 screen
 `define CENTERING_Y				((`DISPLAY_HEIGHT-`NEOGEO_DISPLAY_HEIGHT)/2)	// Should be multiple of 8
@@ -79,7 +84,7 @@ wire clk_TMDS = pixclk72;
 // Neo Geo Clk Gen
 ////////////////////////////////////////////////////////////////////////
 
-`define NEOGEOCLK_LIMIT    (`FULL_WIDTH*`FULL_HEIGHT*5) // 5x as TMDS clock is 5x pixclk
+`define NEOGEOCLK_LIMIT    (`FULL_WIDTH*`FULL_HEIGHT*5) // 5x as clk_TMDS clock is 5x pixclk
 `define NEOGEOCLK_ADDITION (`NEOGEO_FULL_WIDTH*`NEOGEO_FULL_HEIGHT*2) // 2x as want 2 transitions
 
 reg [23:0] neoGeoClks;
@@ -95,7 +100,7 @@ always @(posedge clk_TMDS)
 begin
 	if (neoGeoClks>=`NEOGEOCLK_LIMIT)
 	begin
-		neoGeoClks<=neoGeoClks+`NEOGEOCLK_ADDITION-`NEOGEOCLK_LIMIT;
+		neoGeoClks<=neoGeoClks+(`NEOGEOCLK_ADDITION-`NEOGEOCLK_LIMIT);
 		neoGeoClk<=!neoGeoClk;
 	end
 	else
@@ -163,7 +168,11 @@ always @(posedge pixclk) vSync <= !((
 	CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC-1)
  )); // VSync and HSync seem to need to transition at the same time
 
+`ifdef OLD_SYNC
+always @(posedge neogeoclk)
+`else
 always @(negedge neogeoclk)
+`endif
 begin
 	NeoCounterX <= (NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) ? 0 : NeoCounterX+1;
 	if(NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) begin
@@ -174,10 +183,17 @@ begin
 		end
 	end
 	if (sync) begin
+`ifdef OLD_SYNC
+		if (NeoCounterY > `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH) begin
+			NeoCounterY <= `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+1;
+			NeoCounterX <= 0;
+		end
+`else
 		if (NeoCounterY > `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH)
 			NeoCounterY <= `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+1;
 		if ((NeoCounterX>>1)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)>=`NEOGEO_DISPLAY_WIDTH)
 			NeoCounterX <= 2*`NEOGEO_DISPLAY_WIDTH-`NEOGEO_FULL_WIDTH;
+`endif
 	end
 	if ((NeoCounterX>>1)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)<`NEOGEO_DISPLAY_WIDTH) begin
 		if (NeoCounterX[0]) begin
