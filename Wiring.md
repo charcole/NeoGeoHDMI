@@ -51,11 +51,13 @@ Neo Geo to FPGA
 | ```Pin 94    B[3]      ```   |    ```IC6  Pin 6    Blue[3] (Found 470ohm to blue JAMMA output)               ``` |
 | ```Pin 93    B[4]      ```   |    ```IC6  Pin 9    Blue[4] (Found 220ohm to blue JAMMA output)               ``` |
 | ```Pin 79    DAK       ```   |    ```IC7  Pin 19   DAK (Didn't check)                                        ``` |
-| ```Pin 99    SHA       ```   |    ```IC8  Pin 4    SHA (Found 8.2Kohm to red JAMMA output)                   ``` |
+| ```Pin 99    SHA       ```   |    ```IC8  Pin 4    SHA (Found 150ohm to red JAMMA output. See note)          ``` |
 | ```Pin 103   SYNC      ```   |    ```IC6  Pin 1    Clear                                                     ``` |
 | ```Pin 114   audioLR   ```   |    ```IC12 Pin 5    LRCK                                                      ``` |
 | ```Pin 120   audioClk  ```   |    ```IC12 Pin 7    BCLK                                                      ``` |
 | ```Pin 118   audioData ```   |    ```IC12 Pin 6    SDAT                                                      ``` |
+
+Note IC8 is a 74LS05 which is open collector. Therefore we must use the inputs of the logic gate, otherwise it'd be effected by the other outputs when high. Be careful of this if transposing to a different board.
 
 If you are doing this on an older Neo Geo with a YM3016 audio DAC then you need to change the audio connections.
 
@@ -66,32 +68,34 @@ If you are doing this on an older Neo Geo with a YM3016 audio DAC then you need 
 | ```Pin 120   audioClk  ```   |    ```Pin 5    CLOCK                                                          ``` |
 | ```Pin 118   audioData ```   |    ```Pin 4    SD                                                             ``` |
 
-IC |Pin |Value
----|----|-----
-1  |2	|R150
-1  |4	|G150
-1  |6	|B150
-1  |8	|B8K3
-1  |10	|G8K3
-1  |12	|R8K3
-1  |13  |!R8K3	Pin 99
-2  |1	|!CLR	Pin 103
-2  |2	|B3K8	Pin 104
-2  |5	|B2K2	Pin 97
-2  |6	|B1K0	Pin 96
-2  |9	|B470	Pin 94
-2  |12	|B220	Pin 93
-2  |15	|G3K8	Pin 74
-2  |16	|G2K2	Pin 101
-2  |19	|G1K0	Pin 86
-3  |2	|G480	Pin 89
-3  |5	|G220	Pin 91
-3  |6	|R3K8	Pin 75
-3  |9	|R2K2	Pin 92
-3  |12	|R1K0	Pin 90
-3  |15	|R470	Pin 87
-3  |16	|R220	Pin 100
-3  |19	|DAK	Pin 79
+Previsional info for wiring on MV1-FS.
+
+|IC |Pin|Name | FPGA Pin  |
+|---|---|-----|-----------|
+|1  |2	|R150 |           |
+|1  |4	|G150 |           |
+|1  |6	|B150 |           |
+|1  |8	|B8K3 |           |
+|1  |10	|G8K3 |           |
+|1  |12	|R8K3 |           |
+|1  |13	|!R8K3|	Pin 99    |
+|2  |1	|!CLR |	Pin 103   |
+|2  |2	|B3K8 |	Pin 104   |
+|2  |5	|B2K2 |	Pin 97    |
+|2  |6	|B1K0 |	Pin 96    |
+|2  |9	|B470 |	Pin 94    |
+|2  |12	|B220 |	Pin 93    |
+|2  |15	|G3K8 |	Pin 74    |
+|2  |16	|G2K2 |	Pin 101   |
+|2  |19	|G1K0 |	Pin 86    |
+|3  |2	|G480 |	Pin 89    |
+|3  |5	|G220 |	Pin 91    |
+|3  |6	|R3K8 |	Pin 75    |
+|3  |9	|R2K2 |	Pin 92    |
+|3  |12	|R1K0 |	Pin 90    |
+|3  |15	|R470 |	Pin 87    |
+|3  |16	|R220 |	Pin 100   |
+|3  |19	|DAK  |	Pin 79    |
 
 *All lines go through 500Ohm/1KOhm resistor voltage dividers to get from 5V input to 3.3V output. Except NEOGEOCLK which is the only output from the FPGA and drives OSC input directly.*
 
