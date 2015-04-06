@@ -68,34 +68,34 @@ If you are doing this on an older Neo Geo with a YM3016 audio DAC then you need 
 | ```Pin 120   audioClk  ```   |    ```Pin 5    CLOCK                                                          ``` |
 | ```Pin 118   audioData ```   |    ```Pin 4    SD                                                             ``` |
 
-Previsional info for wiring on MV1-FS.
+Previsional info for wiring on MV1-FS. Update coming
 
-|IC |Pin|Name | FPGA Pin  |
-|---|---|-----|-----------|
-|1  |2	|R150 |           |
-|1  |4	|G150 |           |
-|1  |6	|B150 |           |
-|1  |8	|B8K3 |           |
-|1  |10	|G8K3 |           |
-|1  |12	|R8K3 |           |
-|1  |13	|!R8K3|	Pin 99    |
-|2  |1	|!CLR |	Pin 103   |
-|2  |2	|B3K8 |	Pin 104   |
-|2  |5	|B2K2 |	Pin 97    |
-|2  |6	|B1K0 |	Pin 96    |
-|2  |9	|B470 |	Pin 94    |
-|2  |12	|B220 |	Pin 93    |
-|2  |15	|G3K8 |	Pin 74    |
-|2  |16	|G2K2 |	Pin 101   |
-|2  |19	|G1K0 |	Pin 86    |
-|3  |2	|G480 |	Pin 89    |
-|3  |5	|G220 |	Pin 91    |
-|3  |6	|R3K8 |	Pin 75    |
-|3  |9	|R2K2 |	Pin 92    |
-|3  |12	|R1K0 |	Pin 90    |
-|3  |15	|R470 |	Pin 87    |
-|3  |16	|R220 |	Pin 100   |
-|3  |19	|DAK  |	Pin 79    |
+|IC           |Pin|Name | FPGA Pin  |
+|-------------|---|-----|-----------|
+|Left LS273   |2  |G480 | Pin 89    |
+|Left LS273   |5  |G220 | Pin 91    |
+|Left LS273   |6  |R3K8 | Pin 75    |
+|Left LS273   |9  |R2K2 | Pin 92    |
+|Left LS273   |12 |R1K0 | Pin 90    |
+|Left LS273   |15 |R470 | Pin 87    |
+|Left LS273   |16 |R220 | Pin 100   |
+|Left LS273   |19 |DAK  | Pin 79    |
+|Right LS273  |1  |!CLR | Pin 103   |
+|Right LS273  |2  |B3K8 | Pin 104   |
+|Right LS273  |5  |B2K2 | Pin 97    |
+|Right LS273  |6  |B1K0 | Pin 96    |
+|Right LS273  |9  |B470 | Pin 94    |
+|Right LS273  |12 |B220 | Pin 93    |
+|Right LS273  |15 |G3K8 | Pin 74    |
+|Right LS273  |16 |G2K2 | Pin 101   |
+|Right LS273  |19 |G1K0 | Pin 86    |
+|LS05         |1  |!R150| Pin 99    |
+|LS05         |2  |R150 |           |
+|LS05         |4  |G150 |           |
+|LS05         |6  |B150 |           |
+|LS05         |8  |B8K3 |           |
+|LS05         |10 |G8K3 |           |
+|LS05         |12 |R8K3 |           |
 
 *All lines go through 500Ohm/1KOhm resistor voltage dividers to get from 5V input to 3.3V output. Except NEOGEOCLK which is the only output from the FPGA and drives OSC input directly.*
 
