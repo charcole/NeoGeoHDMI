@@ -86,31 +86,39 @@ wire clk_TMDS = pixclk72;
 
 reg [10:0] fraction;
 reg [3:0] neoGeoClks;
-reg neoGeoClkInternal;
 
 initial
 begin
 	neoGeoClks=0;
-	neoGeoClkInternal=0;
 	fraction=0;
 end
 
 wire x10clk = pixclk72^pixclk144; // These clocks are 2 135MHz clocks 90 degrees apart so this makes a 270MHz clock
+reg latch, nlatch;
 
 always @(posedge x10clk)
 begin
 	// To make the timings work we want a neo geo cycle every 11+(111/1024) 270MHz cycles
 	// Keep track of fractional part and when overflows do a longer cycle to bring us back
+	if (neoGeoClks==0) begin
+		nlatch<=latch;
+	end
 	if (neoGeoClks==10) begin
 		neoGeoClks<=(fraction<1024)?0:15;
 		fraction<=(fraction&1023)+111;
 	end else begin
 		neoGeoClks<=neoGeoClks+1;
 	end
-	neoGeoClkInternal <= (neoGeoClks>4);	// There's a glitch in output clock between 5 + 6 so generate a clean clock
 end
 
-assign neogeoclk=(neoGeoClks>5) || (neoGeoClks==5 && !x10clk);
+assign risingEdge=(neoGeoClks==6 && !x10clk);
+
+always @(posedge risingEdge)
+begin
+	latch<=!nlatch;
+end
+
+assign neogeoclk=latch^nlatch;
 
 ////////////////////////////////////////////////////////////////////////
 // Line doubler
@@ -172,9 +180,9 @@ always @(posedge pixclk) vSync <= !((
  )); // VSync and HSync seem to need to transition at the same time
 
 `ifdef OLD_SYNC
-always @(posedge neoGeoClkInternal)
+always @(posedge neogeoclk)
 `else
-always @(negedge neoGeoClkInternal)
+always @(negedge neogeoclk)
 `endif
 begin
 	NeoCounterX <= (NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) ? 0 : NeoCounterX+1;
