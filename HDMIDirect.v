@@ -38,6 +38,7 @@ module HDMIDirectV(
 ////////////////////////////////////////////////////////////////////////
 // User configuration defines
 
+`define OLD_SYNC	// Comment out if have NeoGeo that clears at end of line
 `define YM3016		// Comment out for BU9480F (chip found on newer boards)
 `define SPLASH_SCREEN
 `define BAD_SYNC_DETECT
@@ -59,7 +60,11 @@ module HDMIDirectV(
 `define NEOGEO_DISPLAY_HEIGHT	448
 `define NEOGEO_FULL_WIDTH		768
 `define NEOGEO_FULL_HEIGHT		528
-`define NEOGEO_VSYNC_LENGTH	80
+`ifdef OLD_SYNC
+	`define NEOGEO_VSYNC_LENGTH	81
+`else
+	`define NEOGEO_VSYNC_LENGTH	80
+`endif
 
 `define CENTERING_X				((`DISPLAY_WIDTH-`NEOGEO_DISPLAY_WIDTH)/2)	// For centering NeoGeo's 4:3 screen
 `define CENTERING_Y				((`DISPLAY_HEIGHT-`NEOGEO_DISPLAY_HEIGHT)/2)	// Should be multiple of 8
@@ -79,30 +84,41 @@ wire clk_TMDS = pixclk72;
 // Neo Geo Clk Gen
 ////////////////////////////////////////////////////////////////////////
 
-`define NEOGEOCLK_LIMIT    (`FULL_WIDTH*`FULL_HEIGHT*5) // 5x as TMDS clock is 5x pixclk
-`define NEOGEOCLK_ADDITION (`NEOGEO_FULL_WIDTH*`NEOGEO_FULL_HEIGHT*2) // 2x as want 2 transitions
-
-reg [23:0] neoGeoClks;
-reg neoGeoClk;
+reg [10:0] fraction;
+reg [3:0] neoGeoClks;
 
 initial
 begin
 	neoGeoClks=0;
-	neoGeoClk=0;
+	fraction=0;
 end
 
-always @(posedge clk_TMDS)
+wire x10clk = pixclk72^pixclk144; // These clocks are 2 135MHz clocks 90 degrees apart so this makes a 270MHz clock
+reg latch, nlatch;
+
+always @(posedge x10clk)
 begin
-	if (neoGeoClks>=`NEOGEOCLK_LIMIT)
-	begin
-		neoGeoClks<=neoGeoClks+`NEOGEOCLK_ADDITION-`NEOGEOCLK_LIMIT;
-		neoGeoClk<=!neoGeoClk;
+	// To make the timings work we want a neo geo cycle every 11+(111/1024) 270MHz cycles
+	// Keep track of fractional part and when overflows do a longer cycle to bring us back
+	if (neoGeoClks==0) begin
+		nlatch<=latch;
 	end
-	else
-		neoGeoClks<=neoGeoClks+`NEOGEOCLK_ADDITION;
+	if (neoGeoClks==10) begin
+		neoGeoClks<=(fraction<1024)?0:15;
+		fraction<=(fraction&1023)+111;
+	end else begin
+		neoGeoClks<=neoGeoClks+1;
+	end
 end
 
-assign neogeoclk=neoGeoClk;
+assign risingEdge=(neoGeoClks==6 && !x10clk);
+
+always @(posedge risingEdge)
+begin
+	latch<=!nlatch;
+end
+
+assign neogeoclk=latch^nlatch;
 
 ////////////////////////////////////////////////////////////////////////
 // Line doubler
@@ -163,7 +179,11 @@ always @(posedge pixclk) vSync <= !((
 	CounterY<(`DISPLAY_HEIGHT+`V_FRONT_PORCH+`V_SYNC-1)
  )); // VSync and HSync seem to need to transition at the same time
 
+`ifdef OLD_SYNC
+always @(posedge neogeoclk)
+`else
 always @(negedge neogeoclk)
+`endif
 begin
 	NeoCounterX <= (NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) ? 0 : NeoCounterX+1;
 	if(NeoCounterX==(`NEOGEO_FULL_WIDTH-1)) begin
@@ -174,10 +194,17 @@ begin
 		end
 	end
 	if (sync) begin
+`ifdef OLD_SYNC
+		if (NeoCounterY > `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH) begin
+			NeoCounterY <= `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+1;
+			NeoCounterX <= 0;
+		end
+`else
 		if (NeoCounterY > `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH)
 			NeoCounterY <= `NEOGEO_FULL_HEIGHT-`NEOGEO_VSYNC_LENGTH+1;
 		if ((NeoCounterX>>1)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)>=`NEOGEO_DISPLAY_WIDTH)
 			NeoCounterX <= 2*`NEOGEO_DISPLAY_WIDTH-`NEOGEO_FULL_WIDTH;
+`endif
 	end
 	if ((NeoCounterX>>1)+(NeoCounterY[0]?`NEOGEO_FULL_WIDTH/2:0)<`NEOGEO_DISPLAY_WIDTH) begin
 		if (NeoCounterX[0]) begin
@@ -223,9 +250,9 @@ begin
 	end else begin
 		CounterX<=CounterX+1;
 	end
+	videoaddress<=(CounterY[2:1]*`NEOGEO_DISPLAY_WIDTH) + (CounterX+2-`CENTERING_X); // Look ahead two pixels
 	if (CounterX>=`CENTERING_X && CounterX<`DISPLAY_WIDTH+`CENTERING_X) begin
 		if ((CounterX-`CENTERING_X)<`NEOGEO_DISPLAY_WIDTH) begin
-			videoaddress<=(CounterY[2:1]*`NEOGEO_DISPLAY_WIDTH) + (CounterX-`CENTERING_X);
 			if (scanlineType==2 || !(CounterY&1)) begin
 				redneo <= ((videobus[4:0]<<1)|videobus[15])*3 + (videobus[16]?((videobus[4:0]<<1)|videobus[15]):0);
 				greenneo <= ((videobus[9:5]<<1)|videobus[15])*3 + (videobus[16]?((videobus[9:5]<<1)|videobus[15]):0);

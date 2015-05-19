@@ -45,17 +45,19 @@ Neo Geo to FPGA
 | ```Pin 86    G[2]      ```   |    ```IC6  Pin 15   Green[2] (Found 1Kohm to green JAMMA output)              ``` |
 | ```Pin 89    G[3]      ```   |    ```IC6  Pin 16   Green[3] (Found 470ohm to green JAMMA output)             ``` |
 | ```Pin 91    G[4]      ```   |    ```IC6  Pin 19   Green[4] (Found 220ohm to green JAMMA output)             ``` |
-| ```Pin 73    B[0]      ```   |    ```IC7  Pin 12   Blue[0] (Found 3.9Kohm to blue JAMMA output)              ``` |
+| ```Pin 104   B[0]      ```   |    ```IC7  Pin 12   Blue[0] (Found 3.9Kohm to blue JAMMA output)              ``` |
 | ```Pin 97    B[1]      ```   |    ```IC6  Pin 2    Blue[1] (Found 2.2Kohm to blue JAMMA output)              ``` |
 | ```Pin 96    B[2]      ```   |    ```IC6  Pin 5    Blue[2] (Found 1Kohm to blue JAMMA output)                ``` |
 | ```Pin 94    B[3]      ```   |    ```IC6  Pin 6    Blue[3] (Found 470ohm to blue JAMMA output)               ``` |
 | ```Pin 93    B[4]      ```   |    ```IC6  Pin 9    Blue[4] (Found 220ohm to blue JAMMA output)               ``` |
 | ```Pin 79    DAK       ```   |    ```IC7  Pin 19   DAK (Didn't check)                                        ``` |
-| ```Pin 99    SHA       ```   |    ```IC8  Pin 4    SHA (Found 8.2Kohm to red JAMMA output)                   ``` |
+| ```Pin 99    SHA       ```   |    ```IC8  Pin 4    SHA (Found 150ohm to red JAMMA output. See note)          ``` |
 | ```Pin 103   SYNC      ```   |    ```IC6  Pin 1    Clear                                                     ``` |
 | ```Pin 114   audioLR   ```   |    ```IC12 Pin 5    LRCK                                                      ``` |
 | ```Pin 120   audioClk  ```   |    ```IC12 Pin 7    BCLK                                                      ``` |
 | ```Pin 118   audioData ```   |    ```IC12 Pin 6    SDAT                                                      ``` |
+
+Note IC8 is a 74LS05 which is open collector. Therefore we must use the inputs of the logic gate, otherwise it'd be effected by the other outputs when high. Be careful of this if transposing to a different board.
 
 If you are doing this on an older Neo Geo with a YM3016 audio DAC then you need to change the audio connections.
 
@@ -66,6 +68,34 @@ If you are doing this on an older Neo Geo with a YM3016 audio DAC then you need 
 | ```Pin 120   audioClk  ```   |    ```Pin 5    CLOCK                                                          ``` |
 | ```Pin 118   audioData ```   |    ```Pin 4    SD                                                             ``` |
 
+Previsional info for wiring on MV1-FS. Update coming
+
+|IC           |Pin|Name | FPGA Pin  |
+|-------------|---|-----|-----------|
+|Left LS273   |2  |G480 | Pin 89    |
+|Left LS273   |5  |G220 | Pin 91    |
+|Left LS273   |6  |R3K8 | Pin 75    |
+|Left LS273   |9  |R2K2 | Pin 92    |
+|Left LS273   |12 |R1K0 | Pin 90    |
+|Left LS273   |15 |R470 | Pin 87    |
+|Left LS273   |16 |R220 | Pin 100   |
+|Left LS273   |19 |DAK  | Pin 79    |
+|Right LS273  |1  |!CLR | Pin 103   |
+|Right LS273  |2  |B3K8 | Pin 104   |
+|Right LS273  |5  |B2K2 | Pin 97    |
+|Right LS273  |6  |B1K0 | Pin 96    |
+|Right LS273  |9  |B470 | Pin 94    |
+|Right LS273  |12 |B220 | Pin 93    |
+|Right LS273  |15 |G3K8 | Pin 74    |
+|Right LS273  |16 |G2K2 | Pin 101   |
+|Right LS273  |19 |G1K0 | Pin 86    |
+|LS05         |1  |!R150| Pin 99    |
+|LS05         |2  |R150 |           |
+|LS05         |4  |G150 |           |
+|LS05         |6  |B150 |           |
+|LS05         |8  |B8K3 |           |
+|LS05         |10 |G8K3 |           |
+|LS05         |12 |R8K3 |           |
 
 *All lines go through 500Ohm/1KOhm resistor voltage dividers to get from 5V input to 3.3V output. Except NEOGEOCLK which is the only output from the FPGA and drives OSC input directly.*
 
